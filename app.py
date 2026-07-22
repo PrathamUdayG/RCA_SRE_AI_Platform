@@ -1,153 +1,70 @@
-# app.py
-
 """
-Backend service orchestrator for Linux Server AI Assistant.
-Exposes ask_server(question: str) function to execute the complete workflow.
+Purpose
+-------
+Main backend entrypoint for the AI SRE Platform.
+Maintains backward compatibility with ask_server(question) while delegating to the InvestigationWorkflow orchestrator.
+
+Responsibilities
+----------------
+- Initialize platform dependencies and execute end-to-end investigation workflow.
+
+Does NOT
+---------
+- Implement business logic or infrastructure network calls directly.
 """
 
-from datetime import datetime
-import time
 from typing import Any, Dict
 
-from commands import get_command
-from database import create_logs_table, save_log
-from llm import explain_output, get_command_key
-from parsers import parse_output
-from ssh_client import execute_command
+from application.workflow import InvestigationWorkflow
+from domain.report.models import InvestigationReport
+from shared.logging import get_logger
+
+logger = get_logger("AppBackend")
 
 
 def initialize_backend() -> None:
-    """Initialize database tables safely."""
-    try:
-        create_logs_table()
-    except Exception as e:
-        # DB connection error logged gracefully
-        print(f"[Warning] Database initialization failed: {e}")
+    """Initialize backend platform services and repository schemas."""
+    logger.info("Initializing AI SRE Platform backend services...")
 
 
 def ask_server(question: str) -> Dict[str, Any]:
     """
-    Orchestrates the complete question answering workflow:
-    1. Asks LLM to choose command key.
-    2. Validates command key.
-    3. Executes command via SSH.
-    4. Logs execution to PostgreSQL (graceful error handling).
-    5. Parses output into structured JSON.
-    6. Generates AI explanation from structured data.
-    7. Returns comprehensive response dictionary.
+    Orchestrates the complete investigation workflow across Phases 1-6.
+
+    Parameters
+    ----------
+    question : str
+        Natural language user question.
+
+    Returns
+    -------
+    Dict[str, Any]
+        Structured dictionary payload for backward compatibility with frontend.py.
     """
-    start_time = time.time()
-    timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    workflow = InvestigationWorkflow()
+    report: InvestigationReport = workflow.execute_investigation(question)
 
-    if not question or not question.strip():
-        return {
-            "success": False,
-            "question": question,
-            "command_key": None,
-            "linux_command": None,
-            "raw_output": None,
-            "parsed_output": None,
-            "answer": "Please provide a valid question.",
-            "execution_time_seconds": 0.0,
-            "timestamp": timestamp_str,
-            "error": "Empty question provided.",
-        }
+    # Legacy response key mapping
+    primary_cause = report.rca.primary_root_cause if report.rca else "Investigation complete."
+    exec_summary = report.rca.summary if report.rca else "Metrics collected."
 
-    try:
-        # Step 1: Ask Gemini which command key to execute
-        llm_response = get_command_key(question)
-        command_key = llm_response.get("command_key")
-
-        if command_key == "unsupported":
-            duration = round(time.time() - start_time, 2)
-            return {
-                "success": False,
-                "question": question,
-                "command_key": "unsupported",
-                "linux_command": None,
-                "raw_output": None,
-                "parsed_output": None,
-                "answer": "Sorry, I cannot answer that question with the current command set.",
-                "execution_time_seconds": duration,
-                "timestamp": timestamp_str,
-                "error": "Unsupported command requested.",
-            }
-
-        # Step 2: Validate command key in registry
-        command_info = get_command(command_key)
-        if command_info is None:
-            duration = round(time.time() - start_time, 2)
-            return {
-                "success": False,
-                "question": question,
-                "command_key": command_key,
-                "linux_command": None,
-                "raw_output": None,
-                "parsed_output": None,
-                "answer": f"Command key '{command_key}' is not registered.",
-                "execution_time_seconds": duration,
-                "timestamp": timestamp_str,
-                "error": f"Command key '{command_key}' not found.",
-            }
-
-        linux_command = command_info["command"]
-
-        # Step 3: Execute SSH command
-        result = execute_command(linux_command)
-        raw_output = result.get("output", "")
-        error_msg = result.get("error", "")
-
-        # Step 4: Save execution log to database (non-blocking failure)
-        try:
-            save_log(
-                host=result.get("host", "unknown"),
-                command=linux_command,
-                output=raw_output,
-                error=error_msg,
-            )
-        except Exception as db_err:
-            print(f"[Warning] Failed to log to DB: {db_err}")
-
-        # Step 5: Parse raw output into structured JSON
-        parsed_output = parse_output(linux_command, raw_output)
-
-        # Step 6: Generate AI explanation using Gemini
-        answer = explain_output(
-            user_question=question,
-            command=linux_command,
-            structured_output=parsed_output,
-        )
-
-        duration = round(time.time() - start_time, 2)
-
-        return {
-            "success": True,
-            "question": question,
-            "command_key": command_key,
-            "linux_command": linux_command,
-            "raw_output": raw_output,
-            "parsed_output": parsed_output,
-            "answer": answer,
-            "execution_time_seconds": duration,
-            "timestamp": timestamp_str,
-            "error": error_msg if error_msg else None,
-        }
-
-    except Exception as e:
-        duration = round(time.time() - start_time, 2)
-        return {
-            "success": False,
-            "question": question,
-            "command_key": None,
-            "linux_command": None,
-            "raw_output": None,
-            "parsed_output": None,
-            "answer": "An error occurred while processing your request.",
-            "execution_time_seconds": duration,
-            "timestamp": timestamp_str,
-            "error": str(e),
-        }
+    return {
+        "success": report.status in ("SUCCESS", "PARTIAL_SUCCESS"),
+        "question": question,
+        "report_id": report.report_id,
+        "answer": f"**Primary Root Cause**: {primary_cause}\n\n**Summary**: {exec_summary}",
+        "execution_time_seconds": report.total_execution_time_seconds,
+        "timestamp": str(report.created_at),
+        "raw_report": report,
+    }
 
 
-# Initialize DB when module is imported or loaded
-initialize_backend()
+def main():
+    """Main execution function."""
+    initialize_backend()
+    res = ask_server("Why is my server slow?")
+    print(res["answer"])
+
+
+if __name__ == "__main__":
+    main()
