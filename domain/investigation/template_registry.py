@@ -1,0 +1,178 @@
+"""
+Purpose:
+--------
+Registry of pre-configured diagnostic investigation templates.
+
+Responsibilities:
+-----------------
+- Provide template definitions for common SRE incident scenarios.
+- Expose lookup mechanisms for template matching.
+
+Does NOT:
+---------
+- Execute SSH commands.
+- Modify command registry or database records.
+"""
+
+from typing import Dict, List
+
+from .exceptions import TemplateNotFoundError
+from .models import InvestigationStep
+
+
+class TemplateRegistry:
+    """
+    Registry providing standardized sets of investigation steps for incident patterns.
+    """
+
+    def __init__(self):
+        self._templates: Dict[str, List[Dict[str, str]]] = {
+            "slow_server": [
+                {
+                    "command_id": "cpu_load",
+                    "description": "Check system load averages for CPU saturation.",
+                    "parser_name": "parse_uptime",
+                },
+                {
+                    "command_id": "cpu_usage",
+                    "description": "Check current CPU utilization percentages.",
+                    "parser_name": "parse_output",
+                },
+                {
+                    "command_id": "top_cpu_processes",
+                    "description": "Identify top processes consuming CPU resources.",
+                    "parser_name": "parse_output",
+                },
+                {
+                    "command_id": "memory_usage",
+                    "description": "Check RAM usage and swap memory saturation.",
+                    "parser_name": "parse_free_m",
+                },
+                {
+                    "command_id": "top_memory_processes",
+                    "description": "Identify top memory-consuming processes.",
+                    "parser_name": "parse_output",
+                },
+                {
+                    "command_id": "disk_usage",
+                    "description": "Verify filesystem storage availability.",
+                    "parser_name": "parse_df_h",
+                },
+            ],
+            "high_memory": [
+                {
+                    "command_id": "memory_usage",
+                    "description": "Check total RAM and swap space utilization.",
+                    "parser_name": "parse_free_m",
+                },
+                {
+                    "command_id": "memory_details",
+                    "description": "Inspect detailed buffer and cached memory breakdown.",
+                    "parser_name": "parse_output",
+                },
+                {
+                    "command_id": "top_memory_processes",
+                    "description": "Identify processes causing memory pressure.",
+                    "parser_name": "parse_output",
+                },
+            ],
+            "high_cpu": [
+                {
+                    "command_id": "cpu_usage",
+                    "description": "Measure overall CPU activity.",
+                    "parser_name": "parse_output",
+                },
+                {
+                    "command_id": "cpu_load",
+                    "description": "Retrieve 1m, 5m, and 15m load averages.",
+                    "parser_name": "parse_uptime",
+                },
+                {
+                    "command_id": "top_cpu_processes",
+                    "description": "Locate top processes driving CPU usage.",
+                    "parser_name": "parse_output",
+                },
+            ],
+            "disk_space": [
+                {
+                    "command_id": "disk_usage",
+                    "description": "Inspect mounted disk usage percentages.",
+                    "parser_name": "parse_df_h",
+                },
+                {
+                    "command_id": "disk_inodes",
+                    "description": "Check inode capacity and usage.",
+                    "parser_name": "parse_output",
+                },
+                {
+                    "command_id": "block_devices",
+                    "description": "List attached block storage devices.",
+                    "parser_name": "parse_output",
+                },
+            ],
+            "network_connectivity": [
+                {
+                    "command_id": "ip_address",
+                    "description": "Retrieve network interface IP configurations.",
+                    "parser_name": "parse_output",
+                },
+                {
+                    "command_id": "listening_ports",
+                    "description": "Inspect open listening TCP and UDP sockets.",
+                    "parser_name": "parse_output",
+                },
+                {
+                    "command_id": "routing_table",
+                    "description": "Check IP routing gateway configuration.",
+                    "parser_name": "parse_output",
+                },
+            ],
+            "general_health": [
+                {
+                    "command_id": "hostname",
+                    "description": "Get server hostname.",
+                    "parser_name": "parse_hostname",
+                },
+                {
+                    "command_id": "uptime",
+                    "description": "Check server uptime and user count.",
+                    "parser_name": "parse_uptime",
+                },
+                {
+                    "command_id": "memory_usage",
+                    "description": "Check memory availability.",
+                    "parser_name": "parse_free_m",
+                },
+                {
+                    "command_id": "disk_usage",
+                    "description": "Verify disk space availability.",
+                    "parser_name": "parse_df_h",
+                },
+            ],
+        }
+
+    def get_template(self, template_name: str) -> List[InvestigationStep]:
+        """
+        Retrieves instantiated InvestigationStep list for a given template name.
+        """
+        if template_name not in self._templates:
+            raise TemplateNotFoundError(template_name)
+
+        raw_steps = self._templates[template_name]
+        steps = []
+        for idx, item in enumerate(raw_steps, start=1):
+            steps.append(
+                InvestigationStep(
+                    order=idx,
+                    command_id=item["command_id"],
+                    description=item["description"],
+                    parser_name=item["parser_name"],
+                    timeout_seconds=30,
+                    depends_on=[],
+                )
+            )
+        return steps
+
+    def list_templates(self) -> List[str]:
+        """Returns list of registered template names."""
+        return list(self._templates.keys())
