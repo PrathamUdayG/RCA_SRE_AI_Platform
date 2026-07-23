@@ -16,6 +16,7 @@ from .base_rule import BaseCorrelationRule
 from .container_rules import ContainerHealthRule
 from .cpu_rules import CPUSaturationRule
 from .disk_rules import DiskCapacityRule
+from .execution_failure_rules import ExecutionFailureRule
 from .memory_rules import MemoryPressureRule
 from .network_rules import NetworkSocketsRule
 from .process_service_rules import ServiceFailureRule
@@ -28,4 +29,5 @@ __all__ = [
     "NetworkSocketsRule",
     "ServiceFailureRule",
     "ContainerHealthRule",
+    "ExecutionFailureRule",
 ]

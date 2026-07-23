@@ -20,6 +20,7 @@ from domain.correlation.rules import (
     CPUSaturationRule,
     ContainerHealthRule,
     DiskCapacityRule,
+    ExecutionFailureRule,
     MemoryPressureRule,
     NetworkSocketsRule,
     ServiceFailureRule,
@@ -46,6 +47,7 @@ class RuleRegistry:
 
     def _register_default_rules(self) -> None:
         """Registers default domain correlation rules."""
+        self.register_rule(ExecutionFailureRule())
         self.register_rule(CPUSaturationRule())
         self.register_rule(MemoryPressureRule())
         self.register_rule(DiskCapacityRule())

@@ -18,10 +18,10 @@ Does NOT
 from typing import Optional
 
 from domain.correlation.models import CorrelationResult
+from domain.llm import LLMProviderInterface
 from domain.rca.exceptions import InvalidCorrelationResultError
-from domain.rca.llm_interface import LLMProviderInterface
 from domain.rca.models import RootCauseAnalysis
-from infrastructure.llm import GeminiRCAProvider
+from infrastructure.llm.provider_factory import get_llm_rca_provider
 
 
 class RCAService:
@@ -30,7 +30,7 @@ class RCAService:
     """
 
     def __init__(self, provider: Optional[LLMProviderInterface] = None):
-        self.provider = provider or GeminiRCAProvider()
+        self.provider = provider or get_llm_rca_provider()
 
     def analyze_root_cause(self, correlation_result: CorrelationResult) -> RootCauseAnalysis:
         """

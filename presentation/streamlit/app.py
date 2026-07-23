@@ -6,6 +6,7 @@ Streamlit Web Dashboard Presentation Layer for the AI SRE Platform.
 Responsibilities
 ----------------
 - Render interactive web dashboard UI for natural language incident investigations.
+- Render Platform Health Dashboard displaying real-time status of all platform dependencies.
 - Render multi-stage tabs for Investigation Reports, AI RCA, Recommendations, and Policy Decisions.
 
 Does NOT
@@ -14,9 +15,171 @@ Does NOT
 """
 
 import streamlit as st
+from application.health import HealthService
 from application.workflow import InvestigationWorkflow
+from domain.health.models import ComponentStatus
 from domain.report.models import InvestigationReport
 
+
+# ─────────────────────────────────────────────────────────────────────
+# Status Badge Helpers
+# ─────────────────────────────────────────────────────────────────────
+
+_STATUS_BADGES = {
+    ComponentStatus.HEALTHY: "🟢",
+    ComponentStatus.UNHEALTHY: "🔴",
+    ComponentStatus.DEGRADED: "🟡",
+    ComponentStatus.NOT_CONFIGURED: "⚪",
+}
+
+_STATUS_LABELS = {
+    ComponentStatus.HEALTHY: "Healthy",
+    ComponentStatus.UNHEALTHY: "Unhealthy",
+    ComponentStatus.DEGRADED: "Partially Available",
+    ComponentStatus.NOT_CONFIGURED: "Not Configured",
+}
+
+# Future placeholder services (not yet implemented)
+_FUTURE_PLACEHOLDERS = [
+    "Docker Engine",
+    "Kubernetes Cluster",
+    "Redis",
+    "Vector Database",
+    "Knowledge Base",
+    "Monitoring System",
+]
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Health Dashboard Rendering
+# ─────────────────────────────────────────────────────────────────────
+
+def _render_health_dashboard():
+    """
+    Renders the Platform Health Dashboard section.
+
+    Displays overall platform status, individual component health cards
+    with detailed connection metadata in expanders, future service
+    placeholders, and a Refresh button.
+    """
+    st.header("🏥 Platform Health")
+
+    # Initialize or refresh health report in session state
+    if "health_report" not in st.session_state:
+        with st.spinner("Checking platform health..."):
+            health_service = HealthService()
+            st.session_state["health_report"] = health_service.check_all()
+
+    report = st.session_state["health_report"]
+
+    # ── Overall Status Summary Card ──────────────────────────────────
+    overall_badge = _STATUS_BADGES.get(report.overall_status, "⚪")
+    overall_label = _STATUS_LABELS.get(report.overall_status, "Unknown")
+
+    status_color_map = {
+        ComponentStatus.HEALTHY: "green",
+        ComponentStatus.DEGRADED: "orange",
+        ComponentStatus.UNHEALTHY: "red",
+    }
+    border_color = status_color_map.get(report.overall_status, "gray")
+
+    st.markdown(
+        f"""
+        <div style="
+            border: 2px solid {border_color};
+            border-radius: 12px;
+            padding: 16px 24px;
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, rgba(0,0,0,0.02), rgba(0,0,0,0.06));
+        ">
+            <h3 style="margin: 0;">Platform Status: {overall_badge} {overall_label}</h3>
+            <p style="margin: 4px 0 0 0; opacity: 0.7; font-size: 0.9em;">
+                Last checked: {report.checked_at.strftime('%Y-%m-%d %H:%M:%S UTC')} &nbsp;|&nbsp;
+                Version: {report.application_version} &nbsp;|&nbsp;
+                Python: {report.python_version}
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # ── Active Component Health Cards ────────────────────────────────
+    # Group into a 2x2 grid
+    components = report.component_results
+    col_pairs = [components[i:i + 2] for i in range(0, len(components), 2)]
+
+    for pair in col_pairs:
+        cols = st.columns(len(pair))
+        for col, result in zip(cols, pair):
+            with col:
+                badge = _STATUS_BADGES.get(result.status, "⚪")
+                label = _STATUS_LABELS.get(result.status, "Unknown")
+                header_text = f"{badge} {result.component_name} — {label}"
+
+                with st.expander(header_text, expanded=(result.status != ComponentStatus.HEALTHY)):
+                    if result.status == ComponentStatus.HEALTHY:
+                        st.success(f"{result.component_name} is operational.")
+                    elif result.status == ComponentStatus.DEGRADED:
+                        st.warning(f"{result.component_name} is experiencing issues.")
+                    else:
+                        st.error(f"{result.component_name} is unavailable.")
+
+                    # Display detailed metadata
+                    if result.details:
+                        st.markdown("**Connection Details:**")
+                        for key, value in result.details.items():
+                            display_key = key.replace("_", " ").title()
+                            st.markdown(f"- **{display_key}**: `{value}`")
+
+                    # Display latency if available
+                    if result.latency_ms is not None:
+                        st.markdown(f"- **Latency**: `{result.latency_ms} ms`")
+
+                    # Display error information if unhealthy
+                    if result.error_message:
+                        st.markdown("---")
+                        st.markdown(f"**⚠️ Error**: {result.error_message}")
+
+                    if result.recommendation:
+                        st.markdown(f"**💡 Recommendation**: {result.recommendation}")
+
+                    st.caption(f"Checked at: {result.checked_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+
+    # ── Future Service Placeholders ──────────────────────────────────
+    st.markdown("##### Future Services")
+    placeholder_cols = st.columns(3)
+    for idx, service_name in enumerate(_FUTURE_PLACEHOLDERS):
+        with placeholder_cols[idx % 3]:
+            st.markdown(
+                f"""
+                <div style="
+                    border: 1px dashed gray;
+                    border-radius: 8px;
+                    padding: 10px 14px;
+                    margin-bottom: 8px;
+                    opacity: 0.5;
+                    text-align: center;
+                ">
+                    ⚪ {service_name}<br/>
+                    <small>Not Configured</small>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    # ── Refresh Button ───────────────────────────────────────────────
+    if st.button("🔄 Refresh Health Status", key="refresh_health_btn", use_container_width=True):
+        with st.spinner("Re-checking platform health..."):
+            health_service = HealthService()
+            st.session_state["health_report"] = health_service.check_all()
+        st.rerun()
+
+    st.divider()
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Main Dashboard Entry Point
+# ─────────────────────────────────────────────────────────────────────
 
 def render_streamlit_dashboard():
     """Renders the Streamlit AI SRE Platform Web Dashboard."""
@@ -45,6 +208,11 @@ def render_streamlit_dashboard():
         st.divider()
         st.info("Target Server: `testserv.ortusolis.in:22`")
 
+    # ── Platform Health Dashboard (rendered before investigation) ─────
+    _render_health_dashboard()
+
+    # ── Investigation Workflow (existing, unchanged) ─────────────────
+
     # Natural Language Question Input
     query = st.text_input(
         "Ask a diagnostic question about your infrastructure:",
@@ -61,7 +229,12 @@ def render_streamlit_dashboard():
             workflow = InvestigationWorkflow()
             report: InvestigationReport = workflow.execute_investigation(query.strip())
 
-        st.success(f"Investigation completed in {report.total_execution_time_seconds}s!")
+        if report.status == "FAILED":
+            st.error("⚠️ **Investigation could not be completed.** Evidence collection failed over SSH. Root cause is inconclusive.")
+        elif report.status == "PARTIAL_SUCCESS":
+            st.warning(f"⚠️ **Investigation completed with partial evidence** in {report.total_execution_time_seconds}s. Some diagnostic commands failed.")
+        else:
+            st.success(f"Investigation completed successfully in {report.total_execution_time_seconds}s!")
 
         # Key Metric Cards
         col1, col2, col3, col4 = st.columns(4)

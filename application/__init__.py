@@ -14,6 +14,7 @@ Does NOT
 
 from .correlation import CorrelationService
 from .execution import ExecutionService
+from .health import HealthService
 from .policy import PolicyService
 from .rca import RCAService
 from .recommendation import RecommendationService
@@ -26,4 +27,5 @@ __all__ = [
     "RCAService",
     "RecommendationService",
     "PolicyService",
+    "HealthService",
 ]

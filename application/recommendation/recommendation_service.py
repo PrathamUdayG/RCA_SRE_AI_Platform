@@ -17,11 +17,11 @@ Does NOT
 
 from typing import Optional
 
+from domain.llm import RecommendationProviderInterface
 from domain.rca.models import RootCauseAnalysis
 from domain.recommendation.exceptions import InvalidRCAResultError
-from domain.recommendation.llm_interface import RecommendationProviderInterface
 from domain.recommendation.models import RecommendationReport
-from infrastructure.llm import GeminiRecommendationProvider
+from infrastructure.llm.provider_factory import get_llm_recommendation_provider
 
 
 class RecommendationService:
@@ -30,7 +30,7 @@ class RecommendationService:
     """
 
     def __init__(self, provider: Optional[RecommendationProviderInterface] = None):
-        self.provider = provider or GeminiRecommendationProvider()
+        self.provider = provider or get_llm_recommendation_provider()
 
     def generate_report(self, rca: RootCauseAnalysis) -> RecommendationReport:
         """

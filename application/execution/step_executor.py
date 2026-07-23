@@ -94,7 +94,14 @@ class StepExecutor:
             parsed_json = parse_output(linux_command, raw_output)
 
             duration = round(time.time() - start_time, 3)
-            has_error = bool(error_output and error_output.strip())
+            has_error_text = bool(error_output and error_output.strip())
+            has_valid_stdout = bool(raw_output and raw_output.strip())
+            is_ssh_failure = "SSH Execution Failed" in error_output
+
+            if not has_valid_stdout or is_ssh_failure:
+                step_status = ExecutionStatus.FAILED
+            else:
+                step_status = ExecutionStatus.SUCCESS
 
             return StepExecutionResult(
                 step_id=step.step_id,
@@ -102,10 +109,10 @@ class StepExecutor:
                 command_id=step.command_id,
                 linux_command=linux_command,
                 description=step.description,
-                status=ExecutionStatus.FAILED if has_error else ExecutionStatus.SUCCESS,
+                status=step_status,
                 raw_output=raw_output,
                 parsed_output=parsed_json if isinstance(parsed_json, dict) else {"raw": parsed_json},
-                error_message=error_output if has_error else None,
+                error_message=error_output if has_error_text else None,
                 execution_time_seconds=duration,
                 executed_at=executed_at,
             )

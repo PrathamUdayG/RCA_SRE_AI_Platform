@@ -139,6 +139,15 @@ class PolicyService:
 
         duration = round(time.time() - start_time, 4)
 
+        if not all_requests:
+            reasons.append(
+                DecisionReason(
+                    recommendation_id="NONE",
+                    reason_text="No actionable recommendations available — investigation evidence was insufficient.",
+                    policy_applied="DefaultPolicy",
+                )
+            )
+
         # Compute overall decision status
         if any(r.approval_status == ApprovalStatus.PROHIBITED for r in all_requests):
             overall_decision = ApprovalStatus.PROHIBITED

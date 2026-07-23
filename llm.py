@@ -3,17 +3,50 @@
 import json
 import os
 import re
-
 from dotenv import load_dotenv
-from google import genai
+import requests
 
 from commands import COMMANDS
+from shared.config import get_settings
 
 load_dotenv()
 
-client = genai.Client(
-    api_key=os.getenv("GEMINI_API_KEY")
-)
+
+def _call_llm_api(prompt: str) -> str:
+    """Helper calling active LLM API endpoint."""
+    settings = get_settings()
+    api_key = settings.llm.api_key
+    model_name = settings.llm.default_model
+
+    if not api_key:
+        return ""
+
+    url = f"https://api-inference.huggingface.co/models/{model_name}"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 1000,
+            "temperature": 0.1,
+            "return_full_text": False,
+        },
+    }
+
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=20)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list) and len(data) > 0:
+                return data[0].get("generated_text", "")
+            elif isinstance(data, dict) and "generated_text" in data:
+                return data["generated_text"]
+            return resp.text
+        return ""
+    except Exception:
+        return ""
 
 
 def build_system_prompt():
@@ -67,26 +100,14 @@ Response:
 
 
 def get_command_key(user_question: str):
-
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=f"""
-{build_system_prompt()}
-
-User Question:
-
-{user_question}
-"""
-    )
+    prompt = f"{build_system_prompt()}\n\nUser Question:\n{user_question}"
+    raw_text = _call_llm_api(prompt).strip()
 
     try:
-        raw_text = response.text.strip()
         if raw_text.startswith("```"):
-            # Strip backticks and json identifier
             raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text, flags=re.IGNORECASE)
             raw_text = re.sub(r"\s*```$", "", raw_text)
         return json.loads(raw_text)
-
     except Exception:
         return {
             "command_key": "unsupported"
@@ -99,7 +120,7 @@ def explain_output(
     structured_output: dict
 ):
     """
-    Uses Gemini to explain the Linux command output
+    Uses LLM to explain the Linux command output
     in simple English using structured JSON data.
     """
 
@@ -130,9 +151,5 @@ Instructions:
 - Do not mention commands unless necessary.
 """
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt
-    )
-
-    return response.text.strip()
+    response_text = _call_llm_api(prompt)
+    return response_text.strip() if response_text else "Output analyzed from structured telemetry."

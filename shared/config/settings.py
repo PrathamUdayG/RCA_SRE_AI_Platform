@@ -40,8 +40,14 @@ class DatabaseSettings(BaseModel):
 
 class LLMSettings(BaseModel):
     """AI LLM provider settings."""
-    gemini_api_key: str = Field(default_factory=lambda: os.getenv("GEMINI_API_KEY", ""))
-    default_model: str = Field(default="gemini-2.5-flash")
+    provider: str = Field(default_factory=lambda: os.getenv("LLM_PROVIDER", "huggingface"))
+    api_key: str = Field(default_factory=lambda: os.getenv("LLM_API_KEY", ""))
+    default_model: str = Field(default_factory=lambda: os.getenv("LLM_MODEL", "Qwen/Qwen2.5-72B-Instruct"))
+
+    @property
+    def model(self) -> str:
+        """Alias for default_model."""
+        return self.default_model
 
 
 class PlatformSettings(BaseModel):

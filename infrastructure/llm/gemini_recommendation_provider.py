@@ -280,48 +280,120 @@ Instructions:
         """Deterministic rule-based fallback when Gemini API is unconfigured or unreachable."""
         duration = round(time.time() - start_time, 3)
 
-        rec_actions = [
-            Recommendation(
-                title="Inspect High Resource Consuming Services",
-                description="Identify and review top memory/CPU process memory consumption patterns.",
-                reason=rca.primary_root_cause,
-                category=RecommendationCategory.IMMEDIATE,
-                priority=RecommendationPriority.P1_CRITICAL,
-                risk_level=RiskLevel.LOW,
-                expected_benefit="Prevents further resource degradation.",
-                estimated_impact="No downtime for read-only inspection.",
-                required_skill_level="Senior SRE",
-                requires_human_approval=True,
-                target_resource="System Resources",
+        is_inconclusive = rca.overall_confidence < 0.3 or "Inconclusive" in rca.primary_root_cause or "failed" in rca.primary_root_cause.lower()
+
+        if is_inconclusive:
+            rec_actions = [
+                Recommendation(
+                    title="Verify SSH Connectivity & Environment Configuration",
+                    description="Verify that SSH_HOST, SSH_PORT, SSH_USERNAME, and SSH_PASSWORD in .env are valid and target host is reachable.",
+                    reason=rca.primary_root_cause,
+                    category=RecommendationCategory.IMMEDIATE,
+                    priority=RecommendationPriority.P1_CRITICAL,
+                    risk_level=RiskLevel.LOW,
+                    expected_benefit="Restores diagnostic telemetry collection.",
+                    estimated_impact="No server downtime.",
+                    required_skill_level="Senior SRE",
+                    requires_human_approval=False,
+                    target_resource="SSH Environment Configuration",
+                ),
+                Recommendation(
+                    title="Verify Linux Command Permissions & Registries",
+                    description="Ensure whitelisted diagnostic commands (e.g. top, free, df) are installed on the remote Linux host and accessible.",
+                    reason="Prevent command execution failures during automated investigation.",
+                    category=RecommendationCategory.SHORT_TERM,
+                    priority=RecommendationPriority.P2_HIGH,
+                    risk_level=RiskLevel.LOW,
+                    expected_benefit="Ensures diagnostic commands complete successfully.",
+                    estimated_impact="No server downtime.",
+                    required_skill_level="Senior SRE",
+                    requires_human_approval=False,
+                    target_resource="Linux Host Binaries",
+                ),
+                Recommendation(
+                    title="Re-run Autonomous Investigation",
+                    description="Re-run the investigation pipeline after validating SSH connection and permissions.",
+                    reason="Collect clean operational telemetry once connection is established.",
+                    category=RecommendationCategory.IMMEDIATE,
+                    priority=RecommendationPriority.P2_HIGH,
+                    risk_level=RiskLevel.LOW,
+                    expected_benefit="Produces valid Root Cause Analysis report.",
+                    estimated_impact="No server downtime.",
+                    required_skill_level="Senior SRE",
+                    requires_human_approval=False,
+                    target_resource="Platform Pipeline",
+                ),
+            ]
+
+            val_steps = [
+                ValidationStep(step_number=1, command_or_metric="ssh_check", expected_outcome="SSH connection status: CONNECTED"),
+                ValidationStep(step_number=2, command_or_metric="uptime", expected_outcome="Command returns exit code 0"),
+            ]
+
+            rollback_plan = RollbackPlan(
+                rollback_steps=["No remote infrastructure changes executed."],
+                estimated_rollback_time_minutes=1,
+                risk_summary="Zero risk diagnostic guidance.",
             )
-        ]
 
-        val_steps = [
-            ValidationStep(step_number=1, command_or_metric="free -m", expected_outcome="RAM usage < 80%"),
-            ValidationStep(step_number=2, command_or_metric="uptime", expected_outcome="1m load < 1.5"),
-        ]
+            mon_recs = [
+                MonitoringRecommendation(
+                    metric_or_alert="ssh_connection_failures",
+                    suggested_threshold="> 0",
+                    rationale="Alert on platform-to-host connectivity degradation.",
+                )
+            ]
 
-        rollback_plan = RollbackPlan(
-            rollback_steps=["No state-changing commands executed. Revert any manual service changes if applied."],
-            estimated_rollback_time_minutes=5,
-            risk_summary="Zero risk read-only recommendations.",
-        )
+            prev_recs = [
+                PreventionRecommendation(
+                    preventive_action="Implement periodic SSH health probes.",
+                    target_system="Platform Health Monitoring",
+                    benefit="Detects host connectivity drops before incident investigations.",
+                )
+            ]
+        else:
+            rec_actions = [
+                Recommendation(
+                    title="Inspect High Resource Consuming Services",
+                    description="Identify and review top memory/CPU process memory consumption patterns.",
+                    reason=rca.primary_root_cause,
+                    category=RecommendationCategory.IMMEDIATE,
+                    priority=RecommendationPriority.P1_CRITICAL,
+                    risk_level=RiskLevel.LOW,
+                    expected_benefit="Prevents further resource degradation.",
+                    estimated_impact="No downtime for read-only inspection.",
+                    required_skill_level="Senior SRE",
+                    requires_human_approval=True,
+                    target_resource="System Resources",
+                )
+            ]
 
-        mon_recs = [
-            MonitoringRecommendation(
-                metric_or_alert="memory_used_percent",
-                suggested_threshold="> 80%",
-                rationale="Early warning before swap activation.",
+            val_steps = [
+                ValidationStep(step_number=1, command_or_metric="free -m", expected_outcome="RAM usage < 80%"),
+                ValidationStep(step_number=2, command_or_metric="uptime", expected_outcome="1m load < 1.5"),
+            ]
+
+            rollback_plan = RollbackPlan(
+                rollback_steps=["No state-changing commands executed. Revert any manual service changes if applied."],
+                estimated_rollback_time_minutes=5,
+                risk_summary="Zero risk read-only recommendations.",
             )
-        ]
 
-        prev_recs = [
-            PreventionRecommendation(
-                preventive_action="Implement memory limits on worker services.",
-                target_system="Systemd / Container Runtime",
-                benefit="Prevents single process OOM from crashing system.",
-            )
-        ]
+            mon_recs = [
+                MonitoringRecommendation(
+                    metric_or_alert="memory_used_percent",
+                    suggested_threshold="> 80%",
+                    rationale="Early warning before swap activation.",
+                )
+            ]
+
+            prev_recs = [
+                PreventionRecommendation(
+                    preventive_action="Implement memory limits on worker services.",
+                    target_system="Systemd / Container Runtime",
+                    benefit="Prevents single process OOM from crashing system.",
+                )
+            ]
 
         metadata = RecommendationMetadata(
             provider_used="Gemini (Fallback Engine)" if error_reason else "Deterministic Advisory Synthesizer",
@@ -341,7 +413,7 @@ Instructions:
             rollback_plan=rollback_plan,
             monitoring_recommendations=mon_recs,
             preventive_recommendations=prev_recs,
-            additional_investigations=["Check application heap dumps or profiling logs."],
+            additional_investigations=["Re-run investigation once SSH connectivity is verified."],
             metadata=metadata,
             created_at=executed_at,
         )

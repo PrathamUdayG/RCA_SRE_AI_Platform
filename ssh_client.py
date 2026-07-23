@@ -53,17 +53,39 @@ class SSHClientManager:
         print(f"Closed SSH connection to {self.host}.")
 
 
-def execute_command(command: str) -> dict:
-    """Convenience function to execute a single SSH command on the remote host."""
+import time
+
+def execute_command(command: str, max_retries: int = 2) -> dict:
+    """
+    Convenience function to execute a single SSH command on the remote host with retry capability.
+    
+    Returns a dictionary containing host, output, and error strings.
+    Never crashes downstream callers on connection failure.
+    """
     mgr = SSHClientManager()
-    mgr.connect()
-    try:
-        output, error = mgr.execute_command(command)
-        return {
-            "host": mgr.host,
-            "output": output,
-            "error": error
-        }
-    finally:
-        mgr.close()
+    last_exception = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            mgr.connect()
+            try:
+                output, error = mgr.execute_command(command)
+                return {
+                    "host": mgr.host,
+                    "output": output,
+                    "error": error
+                }
+            finally:
+                mgr.close()
+        except Exception as err:
+            last_exception = err
+            if attempt < max_retries:
+                time.sleep(1)
+
+    return {
+        "host": mgr.host,
+        "output": "",
+        "error": f"SSH Execution Failed ({type(last_exception).__name__}): {last_exception}"
+    }
+
 

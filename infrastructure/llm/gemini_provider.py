@@ -253,20 +253,37 @@ Instructions:
         """Deterministic rule-based fallback when Gemini API is unconfigured or unreachable."""
         duration = round(time.time() - start_time, 3)
 
+        has_execution_failures = any("Execution Failed" in f.title or "Failure" in f.title for f in corr.findings)
+
         if not corr.findings:
-            primary_rc = "No operational anomalies or findings were detected during investigation."
-            summary = "System metrics appear healthy. No critical thresholds were exceeded."
-            confidence = 1.0
+            primary_rc = "Investigation Inconclusive — insufficient evidence collected from host."
+            summary = "No diagnostic metric findings could be extracted. Unable to verify system health."
+            confidence = 0.1
             primary_hyp = Hypothesis(
-                title="System Operational & Healthy",
-                description="All diagnostic steps completed without resource threshold violations.",
-                likelihood_score=1.0,
+                title="Investigation Inconclusive",
+                description="No operational evidence was retrieved from server diagnostics.",
+                likelihood_score=0.1,
                 is_primary=True,
             )
             reasoning = [
-                ReasoningTrace(step_number=1, observation="All metric evaluations clean.", deduction="No incident detected.")
+                ReasoningTrace(step_number=1, observation="Zero correlated findings retrieved.", deduction="Cannot establish root cause without empirical evidence.")
             ]
-            affected = [AffectedComponent(component_type="SYSTEM", name="Server Host", impact_level="LOW")]
+            affected = [AffectedComponent(component_type="SYSTEM", name="Server Host", impact_level="HIGH")]
+        elif has_execution_failures and len(corr.findings) == sum(1 for f in corr.findings if "Execution Failed" in f.title or "Failure" in f.title):
+            primary_rc = "Investigation Inconclusive — Diagnostic SSH command execution failed."
+            summary = "Remote diagnostic commands failed to execute. Infrastructure telemetry could not be gathered."
+            confidence = 0.1
+            primary_hyp = Hypothesis(
+                title="Diagnostic Execution Failure",
+                description="Commands executed over SSH failed or returned no output.",
+                likelihood_score=0.1,
+                is_primary=True,
+            )
+            reasoning = [
+                ReasoningTrace(step_number=idx + 1, observation=f.title, deduction=f.summary)
+                for idx, f in enumerate(corr.findings)
+            ]
+            affected = [AffectedComponent(component_type="SYSTEM", name="SSH Connectivity", impact_level="CRITICAL")]
         else:
             top_finding = max(corr.findings, key=lambda f: f.confidence_score)
             primary_rc = f"Primary cause associated with {top_finding.title}: {top_finding.summary}"

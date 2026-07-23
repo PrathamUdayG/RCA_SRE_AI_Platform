@@ -98,6 +98,17 @@ COMMANDS = {
         ]
     },
 
+    "uptime": {
+        "description": "Get system uptime and load averages",
+        "command": "uptime",
+        "category": "System Information",
+        "examples": [
+            "How long has the server been up?",
+            "Show server uptime",
+            "Check system load averages and uptime"
+        ]
+    },
+
     # CPU Information
     "cpu_information": {
         "description": "Get CPU information",
