@@ -6,15 +6,18 @@ Streamlit Web Dashboard Presentation Layer for the AI SRE Platform.
 Responsibilities
 ----------------
 - Render interactive web dashboard UI for natural language incident investigations.
+- Render Executive Investigation Summary providing a direct answer to user queries first.
 - Render Platform Health Dashboard displaying real-time status of all platform dependencies.
-- Render multi-stage tabs for Investigation Reports, AI RCA, Recommendations, and Policy Decisions.
+- Render expandable technical audit trail for Phases 1-6.
 
 Does NOT
 ---------
 - Implement business logic or direct SSH/database calls.
 """
 
+from datetime import datetime
 import streamlit as st
+
 from application.health import HealthService
 from application.workflow import InvestigationWorkflow
 from domain.health.models import ComponentStatus
@@ -39,7 +42,6 @@ _STATUS_LABELS = {
     ComponentStatus.NOT_CONFIGURED: "Not Configured",
 }
 
-# Future placeholder services (not yet implemented)
 _FUTURE_PLACEHOLDERS = [
     "Docker Engine",
     "Kubernetes Cluster",
@@ -57,14 +59,9 @@ _FUTURE_PLACEHOLDERS = [
 def _render_health_dashboard():
     """
     Renders the Platform Health Dashboard section.
-
-    Displays overall platform status, individual component health cards
-    with detailed connection metadata in expanders, future service
-    placeholders, and a Refresh button.
     """
     st.header("🏥 Platform Health")
 
-    # Initialize or refresh health report in session state
     if "health_report" not in st.session_state:
         with st.spinner("Checking platform health..."):
             health_service = HealthService()
@@ -72,7 +69,6 @@ def _render_health_dashboard():
 
     report = st.session_state["health_report"]
 
-    # ── Overall Status Summary Card ──────────────────────────────────
     overall_badge = _STATUS_BADGES.get(report.overall_status, "⚪")
     overall_label = _STATUS_LABELS.get(report.overall_status, "Unknown")
 
@@ -103,8 +99,6 @@ def _render_health_dashboard():
         unsafe_allow_html=True,
     )
 
-    # ── Active Component Health Cards ────────────────────────────────
-    # Group into a 2x2 grid
     components = report.component_results
     col_pairs = [components[i:i + 2] for i in range(0, len(components), 2)]
 
@@ -124,18 +118,15 @@ def _render_health_dashboard():
                     else:
                         st.error(f"{result.component_name} is unavailable.")
 
-                    # Display detailed metadata
                     if result.details:
                         st.markdown("**Connection Details:**")
                         for key, value in result.details.items():
                             display_key = key.replace("_", " ").title()
                             st.markdown(f"- **{display_key}**: `{value}`")
 
-                    # Display latency if available
                     if result.latency_ms is not None:
                         st.markdown(f"- **Latency**: `{result.latency_ms} ms`")
 
-                    # Display error information if unhealthy
                     if result.error_message:
                         st.markdown("---")
                         st.markdown(f"**⚠️ Error**: {result.error_message}")
@@ -145,7 +136,6 @@ def _render_health_dashboard():
 
                     st.caption(f"Checked at: {result.checked_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
 
-    # ── Future Service Placeholders ──────────────────────────────────
     st.markdown("##### Future Services")
     placeholder_cols = st.columns(3)
     for idx, service_name in enumerate(_FUTURE_PLACEHOLDERS):
@@ -167,97 +157,169 @@ def _render_health_dashboard():
                 unsafe_allow_html=True,
             )
 
-    # ── Refresh Button ───────────────────────────────────────────────
     if st.button("🔄 Refresh Health Status", key="refresh_health_btn", use_container_width=True):
         with st.spinner("Re-checking platform health..."):
             health_service = HealthService()
             st.session_state["health_report"] = health_service.check_all()
         st.rerun()
 
-    st.divider()
-
 
 # ─────────────────────────────────────────────────────────────────────
-# Main Dashboard Entry Point
+# Executive Investigation Summary Rendering (PRIMARY DISPLAY)
 # ─────────────────────────────────────────────────────────────────────
 
-def render_streamlit_dashboard():
-    """Renders the Streamlit AI SRE Platform Web Dashboard."""
-    st.set_page_config(
-        page_title="AI SRE Platform for Autonomous Operations",
-        page_icon="🛡️",
-        layout="wide",
-        initial_sidebar_state="expanded",
+def _render_executive_summary(report: InvestigationReport):
+    """
+    Renders the Executive Investigation Summary section.
+    Synthesizes the direct answer, KPI metrics, supporting evidence,
+    recommendation, and investigation metadata.
+    """
+    st.header("📊 Executive Investigation Summary")
+
+    # Synthesize Direct Answer to User Question
+    q_lower = report.user_question.lower()
+    is_historical = any(k in q_lower for k in ["when", "past", "history", "historical", "last week", "yesterday", "earlier", "spike last"])
+
+    if is_historical:
+        answer_text = (
+            f"The platform executed real-time diagnostic probes via SSH over target host `testserv.ortusolis.in:22`. "
+            f"However, it could not determine historical metric trends because historical telemetry (e.g. from Prometheus, Grafana, SAR, "
+            f"or previously stored investigation metrics) is not currently configured on this host. "
+            f"Current real-time diagnostic status: {report.rca.summary if report.rca else 'No real-time anomalies detected.'}"
+        )
+        inv_status = "INCONCLUSIVE"
+        status_badge_str = "⚪ INCONCLUSIVE"
+    elif report.status == "FAILED":
+        answer_text = (
+            "The platform could not determine the root cause because evidence collection failed during the SSH investigation. "
+            "Verify SSH credentials and network connectivity to the target host."
+        )
+        inv_status = "FAILED"
+        status_badge_str = "🔴 FAILED"
+    elif report.rca and report.rca.overall_confidence >= 0.3:
+        answer_text = report.rca.summary
+        inv_status = report.status
+        status_badge_str = f"🟢 {report.status}" if report.status == "SUCCESS" else f"🟡 {report.status}"
+    else:
+        answer_text = (
+            f"Diagnostic metrics were collected, but evidence was inconclusive to confidently isolate a primary root cause. "
+            f"{report.rca.summary if report.rca else ''}"
+        )
+        inv_status = "INCONCLUSIVE"
+        status_badge_str = "⚪ INCONCLUSIVE"
+
+    # ── Executive Direct Answer Box ────────────────────────────────────
+    st.markdown(
+        f"""
+        <div style="
+            border: 2px solid #1E88E5;
+            border-radius: 12px;
+            padding: 20px 24px;
+            background: linear-gradient(135deg, rgba(30,136,229,0.06), rgba(30,136,229,0.02));
+            margin-bottom: 24px;
+        ">
+            <div style="font-size: 0.85em; text-transform: uppercase; letter-spacing: 1px; color: #1565C0; font-weight: bold; margin-bottom: 4px;">
+                Direct Investigation Answer
+            </div>
+            <h4 style="margin: 0 0 12px 0; color: #0D47A1;">Question: "{report.user_question}"</h4>
+            <p style="font-size: 1.1em; line-height: 1.6; margin: 0; color: #1A237E;">
+                {answer_text}
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
-    st.title("🛡️ AI SRE Platform for Autonomous Operations")
-    st.caption("End-to-End Autonomous Incident Investigation, Correlation, RCA, Recommendation & Policy Engine")
+    # ── Executive Key Metric Row (4 KPI Cards) ────────────────────────
+    col1, col2, col3, col4 = st.columns(4)
 
-    # Sidebar Information
-    with st.sidebar:
-        st.header("⚙️ Platform Architecture")
-        st.markdown("""
-        **Pipeline Stages**:
-        1. 📋 **Phase 1**: Investigation Planner
-        2. ⚡ **Phase 2**: Execution Engine
-        3. 🔗 **Phase 3**: Correlation Engine
-        4. 🧠 **Phase 4**: AI RCA Engine
-        5. 📋 **Phase 5**: Recommendation Engine
-        6. 🛡️ **Phase 6**: Policy Engine
-        """)
-        st.divider()
-        st.info("Target Server: `testserv.ortusolis.in:22`")
+    confidence_score = report.rca.overall_confidence if report.rca else 0.0
+    confidence_pct = f"{round(confidence_score * 100, 1)}%"
+    primary_rc = report.rca.primary_root_cause if (report.rca and confidence_score >= 0.3) else "Investigation Inconclusive"
+    top_recommendation = report.recommendation.recommended_actions[0].title if (report.recommendation and report.recommendation.recommended_actions) else "N/A"
 
-    # ── Platform Health Dashboard (rendered before investigation) ─────
-    _render_health_dashboard()
+    with col1:
+        st.metric("Investigation Status", inv_status, delta=status_badge_str)
+    with col2:
+        st.metric("Overall Confidence", confidence_pct)
+    with col3:
+        st.metric("Primary Root Cause", primary_rc[:35] + "..." if len(primary_rc) > 35 else primary_rc)
+    with col4:
+        st.metric("Top Recommended Action", top_recommendation[:35] + "..." if len(top_recommendation) > 35 else top_recommendation)
 
-    # ── Investigation Workflow (existing, unchanged) ─────────────────
+    st.markdown("<br/>", unsafe_allow_html=True)
 
-    # Natural Language Question Input
-    query = st.text_input(
-        "Ask a diagnostic question about your infrastructure:",
-        placeholder="e.g., Why is my server slow and unresponsive?",
-        key="user_query_input",
-    )
-
-    if st.button("Run Autonomous Investigation", type="primary", use_container_width=True):
-        if not query.strip():
-            st.warning("Please enter a valid natural language question.")
-            return
-
-        with st.spinner("Executing end-to-end investigation pipeline (Phases 1-6)..."):
-            workflow = InvestigationWorkflow()
-            report: InvestigationReport = workflow.execute_investigation(query.strip())
-
-        if report.status == "FAILED":
-            st.error("⚠️ **Investigation could not be completed.** Evidence collection failed over SSH. Root cause is inconclusive.")
-        elif report.status == "PARTIAL_SUCCESS":
-            st.warning(f"⚠️ **Investigation completed with partial evidence** in {report.total_execution_time_seconds}s. Some diagnostic commands failed.")
+    # ── Key Supporting Evidence Grid ──────────────────────────────────
+    st.subheader("🔑 Key Supporting Evidence")
+    if report.correlation and report.correlation.findings:
+        evidence_data = []
+        for f in report.correlation.findings:
+            for ev in f.evidences:
+                evidence_data.append({
+                    "Finding Title": f.title,
+                    "Category": f.category.value,
+                    "Severity": f.severity.value,
+                    "Metric": ev.metric_name,
+                    "Observed Value": str(ev.observed_value),
+                    "Threshold": str(ev.threshold),
+                })
+        if evidence_data:
+            st.dataframe(evidence_data, use_container_width=True)
         else:
-            st.success(f"Investigation completed successfully in {report.total_execution_time_seconds}s!")
+            st.info("No numeric metric thresholds breached during diagnostic execution.")
+    else:
+        st.info("No correlated findings recorded.")
 
-        # Key Metric Cards
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Overall Status", report.status)
-        with col2:
-            st.metric("Duration", f"{report.total_execution_time_seconds}s")
-        with col3:
-            findings_count = len(report.correlation.findings) if report.correlation else 0
-            st.metric("Correlated Findings", findings_count)
-        with col4:
-            policy_status = report.policy_decision.overall_decision.value if report.policy_decision else "N/A"
-            st.metric("Policy Status", policy_status)
+    # ── Primary Recommended Next Action ──────────────────────────────
+    if report.recommendation and report.recommendation.recommended_actions:
+        st.subheader("💡 Recommended Next Action")
+        action = report.recommendation.recommended_actions[0]
+        st.warning(
+            f"**Action**: {action.title}\n\n"
+            f"**Priority**: `{action.priority.value}` | **Risk Level**: `{action.risk_level.value}` | **Skill Level**: `{action.required_skill_level}`\n\n"
+            f"**Reasoning**: {action.reason}\n\n"
+            f"**Description**: {action.description}"
+        )
 
-        st.divider()
+    # ── Investigation Metadata Panel ─────────────────────────────────
+    st.subheader("ℹ️ Investigation Metadata & Data Quality")
+    total_steps = len(report.execution.step_results) if report.execution else 0
+    failed_steps = sum(1 for s in report.execution.step_results if s.status.value == "FAILED") if report.execution else 0
+    succeeded_steps = total_steps - failed_steps
+    data_quality_pct = f"{round((succeeded_steps / total_steps) * 100, 1)}%" if total_steps > 0 else "0%"
 
-        # Multi-Stage Tab Views
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    meta_c1, meta_c2, meta_c3, meta_c4 = st.columns(4)
+    with meta_c1:
+        st.markdown(f"**Investigation ID**:\n`{report.report_id}`")
+        st.markdown(f"**Target Server**:\n`testserv.ortusolis.in:22`")
+    with meta_c2:
+        st.markdown(f"**Start Time (UTC)**:\n`{report.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')}`")
+        st.markdown(f"**Total Duration**:\n`{report.total_execution_time_seconds}s`")
+    with meta_c3:
+        st.markdown(f"**Commands Executed**:\n`{total_steps}` total (`{succeeded_steps}` ok, `{failed_steps}` failed)")
+        st.markdown(f"**Data Quality**:\n`{data_quality_pct}`")
+    with meta_c4:
+        st.markdown(f"**AI Provider**:\n`{report.rca.metadata.provider_used if report.rca else 'N/A'}`")
+        st.markdown(f"**LLM Model**:\n`{report.rca.metadata.model_name if report.rca else 'N/A'}`")
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Technical Pipeline & Audit Trail Rendering (SECONDARY DISPLAY)
+# ─────────────────────────────────────────────────────────────────────
+
+def _render_technical_pipeline(report: InvestigationReport):
+    """
+    Renders the secondary 6-phase technical investigation pipeline and audit trail.
+    """
+    st.divider()
+    with st.expander("🔍 Technical Investigation Pipeline & Audit Trail (Phases 1–6)", expanded=False):
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
             "🧠 Root Cause Analysis (Phase 4)",
             "📋 Guidance & Policy (Phases 5 & 6)",
             "🔗 Correlated Findings (Phase 3)",
             "⚡ Step Executions (Phase 2)",
             "🗺️ Investigation Plan (Phase 1)",
+            "🛡️ Policy Decisions (Phase 6)",
         ])
 
         with tab1:
@@ -290,7 +352,7 @@ def render_streamlit_dashboard():
                     st.write(f"**Description**: {action.description}")
                     st.divider()
             else:
-                st.write("No recommendations or policy decisions available.")
+                st.write("No recommendations available.")
 
         with tab3:
             if report.correlation:
@@ -320,6 +382,80 @@ def render_streamlit_dashboard():
                     st.write(f"**Step #{s.order}**: `{s.command_id}` - {s.description}")
             else:
                 st.write("No plan available.")
+
+        with tab6:
+            if report.policy_decision:
+                st.subheader("🛡️ Phase 6 Policy Engine Evaluation")
+                st.write(f"**Overall Policy Decision**: `{report.policy_decision.overall_decision.value}`")
+                st.write(f"**Evaluation Summary**: {report.policy_decision.summary}")
+                for req in report.policy_decision.approval_requests:
+                    st.markdown(f"- **{req.recommendation_title}**: `{req.approval_status.value}` (Risk: `{req.risk_level.value}`)")
+            else:
+                st.write("No policy decisions available.")
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Main Dashboard Entry Point
+# ─────────────────────────────────────────────────────────────────────
+
+def render_streamlit_dashboard():
+    """Renders the Streamlit AI SRE Platform Web Dashboard."""
+    st.set_page_config(
+        page_title="AI SRE Platform for Autonomous Operations",
+        page_icon="🛡️",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+
+    st.title("🛡️ AI SRE Platform for Autonomous Operations")
+    st.caption("Enterprise Autonomous Incident Investigation, Correlation, RCA, Recommendation & Policy Engine")
+
+    with st.sidebar:
+        st.header("⚙️ Platform Architecture")
+        st.markdown("""
+        **Pipeline Stages**:
+        1. 📋 **Phase 1**: Investigation Planner
+        2. ⚡ **Phase 2**: Execution Engine
+        3. 🔗 **Phase 3**: Correlation Engine
+        4. 🧠 **Phase 4**: AI RCA Engine
+        5. 📋 **Phase 5**: Recommendation Engine
+        6. 🛡️ **Phase 6**: Policy Engine
+        """)
+        st.divider()
+        st.info("Target Server: `testserv.ortusolis.in:22`")
+
+    # ── Platform Health Dashboard ────────────────────────────────────
+    _render_health_dashboard()
+
+    st.divider()
+    st.subheader("🔍 Autonomous Incident Investigation")
+
+    # Natural Language Question Input
+    query = st.text_input(
+        "Ask a diagnostic question about your infrastructure:",
+        placeholder="e.g., Why is my server slow and unresponsive?",
+        key="user_query_input",
+    )
+
+    if st.button("Run Autonomous Investigation", type="primary", use_container_width=True):
+        if not query.strip():
+            st.warning("Please enter a valid natural language question.")
+            return
+
+        with st.spinner("Executing end-to-end investigation pipeline (Phases 1-6)..."):
+            workflow = InvestigationWorkflow()
+            report: InvestigationReport = workflow.execute_investigation(query.strip())
+            st.session_state["last_investigation_report"] = report
+
+    # ── Render Executive Summary & Pipeline if report exists ─────────
+    if "last_investigation_report" in st.session_state:
+        report = st.session_state["last_investigation_report"]
+
+        # 1. PRIMARY DISPLAY: Executive Investigation Summary (Answers user question first)
+        _render_executive_summary(report)
+
+        # 2. SECONDARY DISPLAY: Technical Pipeline & Audit Trail (Phases 1–6)
+        _render_technical_pipeline(report)
 
 
 if __name__ == "__main__":
