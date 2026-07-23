@@ -170,42 +170,23 @@ def _render_health_dashboard():
 
 def _render_executive_summary(report: InvestigationReport):
     """
-    Renders the Executive Investigation Summary section.
-    Synthesizes the direct answer, KPI metrics, supporting evidence,
-    recommendation, and investigation metadata.
+    Renders the Executive Investigation Summary section consuming ExecutiveSummary DTO.
     """
     st.header("📊 Executive Investigation Summary")
 
-    # Synthesize Direct Answer to User Question
-    q_lower = report.user_question.lower()
-    is_historical = any(k in q_lower for k in ["when", "past", "history", "historical", "last week", "yesterday", "earlier", "spike last"])
+    summary = report.executive_summary
+    if not summary:
+        st.info("No executive summary DTO available.")
+        return
 
-    if is_historical:
-        answer_text = (
-            f"The platform executed real-time diagnostic probes via SSH over target host `testserv.ortusolis.in:22`. "
-            f"However, it could not determine historical metric trends because historical telemetry (e.g. from Prometheus, Grafana, SAR, "
-            f"or previously stored investigation metrics) is not currently configured on this host. "
-            f"Current real-time diagnostic status: {report.rca.summary if report.rca else 'No real-time anomalies detected.'}"
-        )
-        inv_status = "INCONCLUSIVE"
-        status_badge_str = "⚪ INCONCLUSIVE"
-    elif report.status == "FAILED":
-        answer_text = (
-            "The platform could not determine the root cause because evidence collection failed during the SSH investigation. "
-            "Verify SSH credentials and network connectivity to the target host."
-        )
-        inv_status = "FAILED"
+    inv_status = summary.investigation_status
+    if inv_status == "SUCCESS":
+        status_badge_str = "🟢 SUCCESS"
+    elif inv_status == "PARTIAL_SUCCESS":
+        status_badge_str = "🟡 PARTIAL SUCCESS"
+    elif inv_status == "FAILED":
         status_badge_str = "🔴 FAILED"
-    elif report.rca and report.rca.overall_confidence >= 0.3:
-        answer_text = report.rca.summary
-        inv_status = report.status
-        status_badge_str = f"🟢 {report.status}" if report.status == "SUCCESS" else f"🟡 {report.status}"
     else:
-        answer_text = (
-            f"Diagnostic metrics were collected, but evidence was inconclusive to confidently isolate a primary root cause. "
-            f"{report.rca.summary if report.rca else ''}"
-        )
-        inv_status = "INCONCLUSIVE"
         status_badge_str = "⚪ INCONCLUSIVE"
 
     # ── Executive Direct Answer Box ────────────────────────────────────
@@ -221,9 +202,9 @@ def _render_executive_summary(report: InvestigationReport):
             <div style="font-size: 0.85em; text-transform: uppercase; letter-spacing: 1px; color: #1565C0; font-weight: bold; margin-bottom: 4px;">
                 Direct Investigation Answer
             </div>
-            <h4 style="margin: 0 0 12px 0; color: #0D47A1;">Question: "{report.user_question}"</h4>
+            <h4 style="margin: 0 0 12px 0; color: #0D47A1;">Question: "{summary.user_question}"</h4>
             <p style="font-size: 1.1em; line-height: 1.6; margin: 0; color: #1A237E;">
-                {answer_text}
+                {summary.direct_answer}
             </p>
         </div>
         """,
@@ -233,10 +214,9 @@ def _render_executive_summary(report: InvestigationReport):
     # ── Executive Key Metric Row (4 KPI Cards) ────────────────────────
     col1, col2, col3, col4 = st.columns(4)
 
-    confidence_score = report.rca.overall_confidence if report.rca else 0.0
-    confidence_pct = f"{round(confidence_score * 100, 1)}%"
-    primary_rc = report.rca.primary_root_cause if (report.rca and confidence_score >= 0.3) else "Investigation Inconclusive"
-    top_recommendation = report.recommendation.recommended_actions[0].title if (report.recommendation and report.recommendation.recommended_actions) else "N/A"
+    confidence_pct = f"{round(summary.confidence_score * 100, 1)}%"
+    primary_rc = summary.primary_root_cause
+    top_recommendation = summary.recommendations_summary
 
     with col1:
         st.metric("Investigation Status", inv_status, delta=status_badge_str)
@@ -245,30 +225,19 @@ def _render_executive_summary(report: InvestigationReport):
     with col3:
         st.metric("Primary Root Cause", primary_rc[:35] + "..." if len(primary_rc) > 35 else primary_rc)
     with col4:
-        st.metric("Top Recommended Action", top_recommendation[:35] + "..." if len(top_recommendation) > 35 else top_recommendation)
+        st.metric("Top Recommendation", top_recommendation[:35] + "..." if len(top_recommendation) > 35 else top_recommendation)
 
     st.markdown("<br/>", unsafe_allow_html=True)
 
     # ── Key Supporting Evidence Grid ──────────────────────────────────
     st.subheader("🔑 Key Supporting Evidence")
-    if report.correlation and report.correlation.findings:
-        evidence_data = []
-        for f in report.correlation.findings:
-            for ev in f.evidences:
-                evidence_data.append({
-                    "Finding Title": f.title,
-                    "Category": f.category.value,
-                    "Severity": f.severity.value,
-                    "Metric": ev.metric_name,
-                    "Observed Value": str(ev.observed_value),
-                    "Threshold": str(ev.threshold),
-                })
-        if evidence_data:
-            st.dataframe(evidence_data, use_container_width=True)
-        else:
-            st.info("No numeric metric thresholds breached during diagnostic execution.")
+    if summary.key_evidence:
+        st.dataframe(summary.key_evidence, use_container_width=True)
+    elif summary.key_findings:
+        for finding_title in summary.key_findings:
+            st.markdown(f"- 📌 **Finding**: {finding_title}")
     else:
-        st.info("No correlated findings recorded.")
+        st.info("No specific empirical metric violations recorded.")
 
     # ── Primary Recommended Next Action ──────────────────────────────
     if report.recommendation and report.recommendation.recommended_actions:
@@ -283,24 +252,21 @@ def _render_executive_summary(report: InvestigationReport):
 
     # ── Investigation Metadata Panel ─────────────────────────────────
     st.subheader("ℹ️ Investigation Metadata & Data Quality")
-    total_steps = len(report.execution.step_results) if report.execution else 0
-    failed_steps = sum(1 for s in report.execution.step_results if s.status.value == "FAILED") if report.execution else 0
-    succeeded_steps = total_steps - failed_steps
-    data_quality_pct = f"{round((succeeded_steps / total_steps) * 100, 1)}%" if total_steps > 0 else "0%"
+    meta = summary.investigation_metadata
 
     meta_c1, meta_c2, meta_c3, meta_c4 = st.columns(4)
     with meta_c1:
-        st.markdown(f"**Investigation ID**:\n`{report.report_id}`")
-        st.markdown(f"**Target Server**:\n`testserv.ortusolis.in:22`")
+        st.markdown(f"**Investigation ID**:\n`{meta.get('investigation_id', report.report_id)[:8]}...`")
+        st.markdown(f"**Target Server**:\n`{meta.get('target_server', 'testserv.ortusolis.in:22')}`")
     with meta_c2:
-        st.markdown(f"**Start Time (UTC)**:\n`{report.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')}`")
-        st.markdown(f"**Total Duration**:\n`{report.total_execution_time_seconds}s`")
+        st.markdown(f"**Start Time (UTC)**:\n`{meta.get('start_time_utc', report.created_at.strftime('%Y-%m-%d %H:%M:%S UTC'))}`")
+        st.markdown(f"**Total Duration**:\n`{meta.get('duration_seconds', report.total_execution_time_seconds)}s`")
     with meta_c3:
-        st.markdown(f"**Commands Executed**:\n`{total_steps}` total (`{succeeded_steps}` ok, `{failed_steps}` failed)")
-        st.markdown(f"**Data Quality**:\n`{data_quality_pct}`")
+        st.markdown(f"**Commands Executed**:\n`{meta.get('commands_executed', 0)}` total (`{meta.get('commands_succeeded', 0)}` ok, `{meta.get('commands_failed', 0)}` failed)")
+        st.markdown(f"**Data Quality**:\n`{meta.get('data_quality_pct', '100%')}`")
     with meta_c4:
-        st.markdown(f"**AI Provider**:\n`{report.rca.metadata.provider_used if report.rca else 'N/A'}`")
-        st.markdown(f"**LLM Model**:\n`{report.rca.metadata.model_name if report.rca else 'N/A'}`")
+        st.markdown(f"**AI Provider**:\n`{meta.get('ai_provider', 'N/A')}`")
+        st.markdown(f"**LLM Model**:\n`{meta.get('llm_model', 'N/A')}`")
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -420,6 +386,7 @@ def render_streamlit_dashboard():
         4. 🧠 **Phase 4**: AI RCA Engine
         5. 📋 **Phase 5**: Recommendation Engine
         6. 🛡️ **Phase 6**: Policy Engine
+        7. 📊 **Synthesis**: Executive Summary Service
         """)
         st.divider()
         st.info("Target Server: `testserv.ortusolis.in:22`")
@@ -442,7 +409,7 @@ def render_streamlit_dashboard():
             st.warning("Please enter a valid natural language question.")
             return
 
-        with st.spinner("Executing end-to-end investigation pipeline (Phases 1-6)..."):
+        with st.spinner("Executing end-to-end investigation pipeline (Phases 1-6 + Executive Synthesis)..."):
             workflow = InvestigationWorkflow()
             report: InvestigationReport = workflow.execute_investigation(query.strip())
             st.session_state["last_investigation_report"] = report

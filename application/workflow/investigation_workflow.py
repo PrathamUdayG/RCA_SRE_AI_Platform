@@ -7,7 +7,8 @@ Responsibilities
 ----------------
 - Execute end-to-end investigation pipeline across all Phase 1-6 engines:
   User Request -> Planner (P1) -> Execution Engine (P2) -> Correlation Engine (P3)
-  -> AI RCA Engine (P4) -> Recommendation Engine (P5) -> Policy Engine (P6) -> Unified InvestigationReport.
+  -> AI RCA Engine (P4) -> Recommendation Engine (P5) -> Policy Engine (P6)
+  -> Executive Summary Synthesis Service -> Unified InvestigationReport.
 
 Does NOT
 ---------
@@ -22,6 +23,7 @@ from application.execution import ExecutionService
 from application.policy import PolicyService
 from application.rca import RCAService
 from application.recommendation import RecommendationService
+from application.summary import ExecutiveSummaryService
 from domain.investigation import InvestigationPlanner
 from domain.report.models import InvestigationReport
 from shared.logging import get_logger
@@ -42,6 +44,7 @@ class InvestigationWorkflow:
         rca_service: Optional[RCAService] = None,
         recommendation_service: Optional[RecommendationService] = None,
         policy_service: Optional[PolicyService] = None,
+        summary_service: Optional[ExecutiveSummaryService] = None,
     ):
         self.planner = planner or InvestigationPlanner()
         self.execution_service = execution_service or ExecutionService()
@@ -49,6 +52,7 @@ class InvestigationWorkflow:
         self.rca_service = rca_service or RCAService()
         self.recommendation_service = recommendation_service or RecommendationService()
         self.policy_service = policy_service or PolicyService()
+        self.summary_service = summary_service or ExecutiveSummaryService()
 
     def execute_investigation(self, user_question: str) -> InvestigationReport:
         """
@@ -62,8 +66,8 @@ class InvestigationWorkflow:
         Returns
         -------
         InvestigationReport
-            Unified report payload containing plan, execution metrics, correlated findings,
-            root cause analysis, operational guidance, and policy decisions.
+            Unified report payload containing executive summary, plan, execution metrics,
+            correlated findings, root cause analysis, operational guidance, and policy decisions.
         """
         start_time = time.time()
         logger.info(f"Starting end-to-end investigation workflow for query: '{user_question}'")
@@ -93,16 +97,29 @@ class InvestigationWorkflow:
         policy_decision = self.policy_service.evaluate_report(recommendation)
 
         total_duration = round(time.time() - start_time, 3)
+
+        # Step 7: Executive Summary Synthesis Layer
+        logger.info("[Synthesis Layer] Generating Executive Investigation Summary...")
+        executive_summary = self.summary_service.generate_summary(
+            user_question=user_question,
+            plan=plan,
+            execution=execution,
+            correlation=correlation,
+            rca=rca,
+            recommendation=recommendation,
+            policy_decision=policy_decision,
+            total_duration=total_duration,
+        )
+
         logger.info(f"Completed investigation workflow in {total_duration}s.")
 
-        overall_status = "SUCCESS"
-        if execution.status.value in ("FAILED", "PARTIAL_SUCCESS"):
-            overall_status = execution.status.value
+        overall_status = executive_summary.investigation_status
 
         return InvestigationReport(
             user_question=user_question,
             status=overall_status,
             total_execution_time_seconds=total_duration,
+            executive_summary=executive_summary,
             plan=plan,
             execution=execution,
             correlation=correlation,
@@ -112,5 +129,6 @@ class InvestigationWorkflow:
             metadata={
                 "workflow_version": "1.0.0",
                 "total_stages_completed": 6,
+                "synthesis_layer": "ExecutiveSummaryService",
             },
         )

@@ -18,6 +18,7 @@ from .health import HealthService
 from .policy import PolicyService
 from .rca import RCAService
 from .recommendation import RecommendationService
+from .summary import ExecutiveSummaryService
 from .workflow import InvestigationWorkflow
 
 __all__ = [
@@ -28,4 +29,5 @@ __all__ = [
     "RecommendationService",
     "PolicyService",
     "HealthService",
+    "ExecutiveSummaryService",
 ]
