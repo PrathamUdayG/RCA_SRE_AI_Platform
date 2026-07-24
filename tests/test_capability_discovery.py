@@ -36,7 +36,7 @@ class TestCapabilityDiscovery(unittest.TestCase):
         capabilities = CapabilityDiscoveryEngine(ssh_client=DiscoveryMockSSHClient()).discover()
         plan = InvestigationPlanner().create_plan("Why is Kubernetes unhealthy?", capabilities)
 
-        self.assertEqual(plan.metadata["matched_template"], "general_health")
+        self.assertEqual(plan.metadata["matched_template"], "container_issues")
         self.assertNotIn("kubectl_pods", [step.command_id for step in plan.steps])
         self.assertIn("not detected", plan.metadata["capability_notice"])
 

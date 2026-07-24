@@ -65,18 +65,18 @@ class TestCopilotWorkspace(unittest.TestCase):
     def test_capture_generates_context_aware_questions(self):
         context = self.context_service.capture(self.report)
 
-        self.assertEqual(context.investigation_id, "investigation-1")
+        self.assertEqual(context.investigation_id, "report-1")
         self.assertIn("Explain load average.", context.suggested_questions)
-        self.assertIs(self.repository.get_context("investigation-1"), context)
+        self.assertIs(self.repository.get_context("report-1"), context)
 
     def test_follow_up_is_grounded_in_saved_evidence(self):
         self.context_service.capture(self.report)
 
-        response = self.conversation_service.answer_follow_up("investigation-1", "Why is this happening?")
+        response = self.conversation_service.answer_follow_up("report-1", "Why is this happening?")
 
         self.assertIn("CPU-bound process", response.content)
         self.assertEqual(response.citations[0].metric_name, "load_average_1m")
-        self.assertEqual(len(self.repository.list_messages("investigation-1")), 2)
+        self.assertEqual(len(self.repository.list_messages("report-1")), 2)
 
     def test_unknown_context_is_rejected_without_execution(self):
         with self.assertRaises(KeyError):
