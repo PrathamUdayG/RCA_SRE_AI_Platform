@@ -1,16 +1,12 @@
 """
 Purpose
 -------
-Service and Process domain correlation rules for analyzing failed systemd services and process state issues.
+Service and Process domain correlation rules consuming structured telemetry for failed systemd services.
 
 Responsibilities
 ----------------
-- Evaluate system service states to detect failed units.
-- Produce structured Service and Process operational Findings.
-
-Does NOT
----------
-- Call LLM APIs or execute SSH commands.
+- Evaluate system service states to detect failed units from structured telemetry.
+- Produce structured Service operational Findings.
 """
 
 from typing import List
@@ -27,7 +23,7 @@ from .base_rule import BaseCorrelationRule
 
 class ServiceFailureRule(BaseCorrelationRule):
     """
-    Evaluates systemd unit states to detect failed services.
+    Evaluates systemd unit states to detect failed services using structured telemetry.
     """
 
     @property
@@ -42,34 +38,35 @@ class ServiceFailureRule(BaseCorrelationRule):
         findings: List[Finding] = []
 
         svc_step = next((s for s in step_results if s.command_id == "failed_services"), None)
-        if not svc_step or not svc_step.raw_output:
+        if not svc_step or not svc_step.parsed_output:
             return findings
 
-        output = svc_step.raw_output.strip()
+        failed_units = svc_step.parsed_output.get("failed_services", [])
+        total_failed = svc_step.parsed_output.get("total_failed", len(failed_units))
 
-        # Check if failed services output contains active failed units
-        if "0 loaded units listed" not in output and "loaded units listed" in output:
-            failed_lines = [line.strip() for line in output.splitlines() if "failed" in line.lower()]
+        if total_failed > 0 or failed_units:
+            unit_names = [f.get("unit", "service") for f in failed_units]
+            evidence = Evidence(
+                metric_name="failed_systemd_units_count",
+                observed_value=total_failed,
+                threshold=0,
+                source_command=svc_step.linux_command,
+                context={"failed_units": unit_names},
+            )
 
-            if failed_lines:
-                evidence = Evidence(
-                    metric_name="failed_systemd_units",
-                    observed_value=failed_lines,
-                    threshold="0 failed units",
-                    source_command=svc_step.linux_command,
+            severity = Severity.CRITICAL if total_failed > 3 else Severity.HIGH
+
+            findings.append(
+                Finding(
+                    title="Failed Systemd Service Units Detected",
+                    category=FindingCategory.SERVICE,
+                    severity=severity,
+                    confidence_score=0.98,
+                    summary=f"Found {total_failed} systemd unit(s) in failed operational state: {', '.join(unit_names[:5])}.",
+                    evidences=[evidence],
+                    related_metrics=["failed_systemd_units_count"],
+                    affected_resources=unit_names or ["Systemd Service Manager"],
                 )
-
-                findings.append(
-                    Finding(
-                        title="Failed Systemd Service Detected",
-                        category=FindingCategory.SERVICE,
-                        severity=Severity.HIGH,
-                        confidence_score=0.95,
-                        summary=f"Found {len(failed_lines)} systemd unit(s) in failed state.",
-                        evidences=[evidence],
-                        related_metrics=["failed_systemd_units"],
-                        affected_resources=["Systemd Service Manager"],
-                    )
-                )
+            )
 
         return findings

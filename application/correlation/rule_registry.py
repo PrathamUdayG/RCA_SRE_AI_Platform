@@ -7,10 +7,6 @@ Responsibilities
 ----------------
 - Maintain registered correlation rules.
 - Provide default rule set initialization.
-
-Does NOT
----------
-- Evaluate rules or execute SSH commands.
 """
 
 from typing import List
@@ -21,7 +17,9 @@ from domain.correlation.rules import (
     ContainerHealthRule,
     DiskCapacityRule,
     ExecutionFailureRule,
+    HealthySystemRule,
     MemoryPressureRule,
+    MissingTelemetryRule,
     NetworkSocketsRule,
     ServiceFailureRule,
 )
@@ -54,3 +52,5 @@ class RuleRegistry:
         self.register_rule(NetworkSocketsRule())
         self.register_rule(ServiceFailureRule())
         self.register_rule(ContainerHealthRule())
+        self.register_rule(HealthySystemRule())
+        self.register_rule(MissingTelemetryRule())

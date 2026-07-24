@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional
 
 from shared.config import get_settings
 from shared.logging import get_logger
-from ssh_client import execute_command as legacy_ssh_execute
+from infrastructure.ssh.ssh_client import execute_command as legacy_ssh_execute
 
 from .ssh_interface import ISSHClient
 

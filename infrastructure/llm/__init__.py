@@ -23,9 +23,11 @@ from .provider_factory import (
     get_llm_rca_provider,
     get_llm_recommendation_provider,
 )
+from .provider_manager import LLMProviderManager
 
 __all__ = [
     "LLMProviderFactory",
+    "LLMProviderManager",
     "GeminiRCAProvider",
     "GeminiRecommendationProvider",
     "HuggingFaceRCAProvider",
@@ -33,3 +35,4 @@ __all__ = [
     "get_llm_rca_provider",
     "get_llm_recommendation_provider",
 ]
+

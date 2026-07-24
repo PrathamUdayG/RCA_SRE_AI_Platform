@@ -101,7 +101,14 @@ class ApprovalRequest(BaseModel):
     approval_status: ApprovalStatus = Field(..., description="Assigned approval status.")
     permission: ActionPermission = Field(..., description="Granted execution permission.")
     required_role: str = Field(default="Senior SRE", description="Role authorized to approve or execute.")
+    risk_level: Optional[RiskLevel] = Field(default=None, description="Assigned risk level of the target action.")
     rejection_reason: Optional[str] = Field(default=None, description="Reason if action is rejected/prohibited.")
+
+    @property
+    def recommendation_title(self) -> str:
+        """Alias property for backward compatibility with UI components expecting recommendation_title."""
+        return self.action_title
+
 
 
 class DecisionMetadata(BaseModel):
@@ -171,3 +178,16 @@ class PolicyDecision(BaseModel):
         default_factory=datetime.utcnow,
         description="UTC creation timestamp."
     )
+
+    @property
+    def summary(self) -> str:
+        """Returns a human-readable summary of the policy evaluation decision."""
+        return (
+            f"Overall Decision: {self.overall_decision.value} | "
+            f"Evaluated: {self.metadata.total_recommendations_evaluated} action(s) | "
+            f"Auto-Approved: {self.metadata.auto_approved_count} | "
+            f"Human Approval Required: {self.metadata.human_approval_count} | "
+            f"Prohibited: {self.metadata.prohibited_count}"
+        )
+
+

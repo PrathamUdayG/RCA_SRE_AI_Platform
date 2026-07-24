@@ -119,6 +119,7 @@ class PolicyService:
                 approval_status=assigned_status,
                 permission=assigned_permission,
                 required_role=role,
+                risk_level=recommendation.risk_level,
                 rejection_reason=rejection,
             )
 

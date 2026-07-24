@@ -25,10 +25,12 @@ from uuid import uuid4
 from domain.correlation.models import CorrelationResult
 from domain.execution.models import InvestigationExecutionResult
 from domain.investigation.models import InvestigationPlan
+from domain.llm import LLMProviderInterface
 from domain.policy.models import PolicyDecision
 from domain.rca.models import RootCauseAnalysis
 from domain.recommendation.models import RecommendationReport
 from domain.report.models import ExecutiveSummary
+from infrastructure.llm.provider_factory import LLMProviderFactory
 from shared.logging import get_logger
 
 logger = get_logger("ExecutiveSummaryService")
@@ -37,8 +39,11 @@ logger = get_logger("ExecutiveSummaryService")
 class ExecutiveSummaryService:
     """
     Dedicated application service that synthesizes the outputs of Phase 1-6
-    into an ExecutiveSummary DTO.
+    into an ExecutiveSummary DTO using the centralized LLMProviderManager.
     """
+
+    def __init__(self, provider: Optional[LLMProviderInterface] = None):
+        self.provider = provider or LLMProviderFactory.get_provider()
 
     def generate_summary(
         self,
@@ -97,7 +102,12 @@ class ExecutiveSummaryService:
             status = execution.status.value if execution else "SUCCESS"
             confidence = rca.overall_confidence
             primary_rc = rca.primary_root_cause
-            direct_answer = rca.summary
+            direct_answer = self.provider.generate_executive_summary(
+                user_question=user_question,
+                correlation_result=correlation,
+                rca=rca,
+                recommendation=recommendation,
+            )
             rec_summary = recommendation.executive_summary if recommendation else "No immediate action required."
         else:
             status = "INCONCLUSIVE"
@@ -140,8 +150,8 @@ class ExecutiveSummaryService:
             "commands_succeeded": succeeded_steps,
             "commands_failed": failed_steps,
             "data_quality_pct": f"{data_quality_val}%",
-            "ai_provider": rca.metadata.provider_used if rca else "N/A",
-            "llm_model": rca.metadata.model_name if rca else "N/A",
+            "ai_provider": self.provider.provider_name,
+            "llm_model": self.provider.model_name,
         }
 
         return ExecutiveSummary(

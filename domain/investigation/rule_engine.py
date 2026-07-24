@@ -6,11 +6,6 @@ Rule matcher engine for analyzing user questions and selecting investigation rul
 Responsibilities:
 -----------------
 - Match user natural language keywords to investigation templates and priority levels.
-
-Does NOT:
----------
-- Call LLM APIs.
-- Execute SSH commands.
 """
 
 from typing import List, Tuple
@@ -66,6 +61,20 @@ class RuleEngine:
                 self.registry.get_template("network_connectivity"),
                 InvestigationPriority.MEDIUM,
                 "network_connectivity",
+            )
+
+        if any(term in q_lower for term in ["service", "failed service", "systemd", "daemon", "unit"]):
+            return (
+                self.registry.get_template("failed_services"),
+                InvestigationPriority.HIGH,
+                "failed_services",
+            )
+
+        if any(term in q_lower for term in ["container", "docker", "pod", "k8s", "kubernetes"]):
+            return (
+                self.registry.get_template("container_issues"),
+                InvestigationPriority.HIGH,
+                "container_issues",
             )
 
         # Fallback to general health investigation

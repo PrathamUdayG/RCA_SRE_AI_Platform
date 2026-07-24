@@ -62,6 +62,20 @@ class LLMProviderInterface(ABC):
         """
         pass
 
+    @abstractmethod
+    def generate_executive_summary(
+        self,
+        user_question: str,
+        correlation_result: CorrelationResult = None,
+        rca: RootCauseAnalysis = None,
+        recommendation: RecommendationReport = None,
+    ) -> str:
+        """
+        Synthesizes a clear, direct executive answer to the user's natural language question
+        based on correlation findings, RCA hypotheses, and operational recommendations.
+        """
+        pass
+
 
 # Aliases for clean backward compatibility
 LLMProvider = LLMProviderInterface

@@ -1,16 +1,13 @@
 """
 Purpose
 -------
-Disk domain correlation rules for analyzing filesystem storage capacity and inode exhaustion.
+Disk domain correlation rules consuming structured telemetry for filesystem storage capacity and inode exhaustion.
 
 Responsibilities
 ----------------
-- Evaluate mounted filesystem utilization percentages.
+- Evaluate mounted filesystem storage utilization and inode capacity percentages.
+- Cross-correlate disk usage % with inode utilization.
 - Produce structured Disk operational Findings.
-
-Does NOT
----------
-- Call LLM APIs or execute SSH commands.
 """
 
 from typing import List
@@ -27,7 +24,7 @@ from .base_rule import BaseCorrelationRule
 
 class DiskCapacityRule(BaseCorrelationRule):
     """
-    Evaluates mounted filesystem space utilization to detect high storage usage or capacity warnings.
+    Evaluates mounted filesystem space and inode utilization telemetry.
     """
 
     @property
@@ -42,12 +39,14 @@ class DiskCapacityRule(BaseCorrelationRule):
         findings: List[Finding] = []
 
         disk_step = next((s for s in step_results if s.command_id == "disk_usage"), None)
+        inode_step = next((s for s in step_results if s.command_id == "disk_inodes"), None)
+
         if not disk_step or not disk_step.parsed_output:
             return findings
 
         filesystems = disk_step.parsed_output.get("filesystems", [])
-
         high_usage_fs = []
+
         for fs in filesystems:
             usage_str = fs.get("usage_percent", "0%").rstrip("%")
             try:
@@ -57,34 +56,46 @@ class DiskCapacityRule(BaseCorrelationRule):
             except ValueError:
                 continue
 
+        # Inode cross-correlation
+        inode_data = {}
+        if inode_step and inode_step.parsed_output:
+            for inode in inode_step.parsed_output.get("inodes", []):
+                inode_data[inode.get("mounted_on", "")] = inode.get("iuse_percent", "0%")
+
         if high_usage_fs:
             evidences = []
             affected_mounts = []
 
             for mount, pct, fs_data in high_usage_fs:
                 affected_mounts.append(mount)
+                ctx = dict(fs_data)
+                if mount in inode_data:
+                    ctx["inode_usage_percent"] = inode_data[mount]
+
                 evidences.append(
                     Evidence(
                         metric_name=f"disk_usage_{mount}",
                         observed_value=f"{pct}%",
                         threshold="80%",
                         source_command=disk_step.linux_command,
-                        context=fs_data,
+                        context=ctx,
                     )
                 )
 
             max_pct = max(pct for _, pct, _ in high_usage_fs)
-            severity = Severity.HIGH if max_pct >= 90 else Severity.MEDIUM
+            severity = Severity.CRITICAL if max_pct >= 95 else (Severity.HIGH if max_pct >= 90 else Severity.MEDIUM)
+
+            summary = f"Filesystem storage usage exceeded safety threshold on mount(s): {', '.join(affected_mounts)} (highest usage: {max_pct}%)."
 
             findings.append(
                 Finding(
-                    title="High Disk Usage Warning",
+                    title="High Disk Capacity Usage Warning",
                     category=FindingCategory.DISK,
                     severity=severity,
                     confidence_score=0.98,
-                    summary=f"Filesystem storage usage exceeded threshold on mount(s): {', '.join(affected_mounts)}.",
+                    summary=summary,
                     evidences=evidences,
-                    related_metrics=["disk_usage_percent"],
+                    related_metrics=["disk_usage_percent", "inode_usage_percent"],
                     affected_resources=affected_mounts,
                 )
             )

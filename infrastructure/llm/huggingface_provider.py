@@ -546,7 +546,7 @@ Formulate prioritized operational recommendations in valid JSON format:
         else:
             top_finding = max(corr.findings, key=lambda f: f.confidence_score)
             primary_rc = f"Primary cause associated with {top_finding.title}: {top_finding.summary}"
-            summary = f"Synthesized diagnosis based on {len(corr.findings)} correlated findings."
+            summary = f"Synthesized diagnosis: {top_finding.title} ({top_finding.summary}) based on {len(corr.findings)} correlated finding(s)."
             confidence = top_finding.confidence_score
 
             supp_evs = [
@@ -603,6 +603,68 @@ Formulate prioritized operational recommendations in valid JSON format:
             metadata=metadata,
             created_at=executed_at,
         )
+
+    def generate_executive_summary(
+        self,
+        user_question: str,
+        correlation_result: Optional[CorrelationResult] = None,
+        rca: Optional[RootCauseAnalysis] = None,
+        recommendation: Optional[RecommendationReport] = None,
+    ) -> str:
+        """
+        Synthesizes executive direct answer narrative to user question using Hugging Face API.
+        """
+        if not self._api_key:
+            return self._fallback_executive_summary(user_question, correlation_result, rca, recommendation)
+
+        prompt = f"""
+You are a Principal Site Reliability Engineer (SRE). Provide a concise, professional 1-2 paragraph executive response directly answering the user's natural language question: "{user_question}".
+
+Investigation Details:
+- Primary Root Cause: {rca.primary_root_cause if rca else 'Inconclusive'}
+- Confidence: {rca.overall_confidence if rca else 0.0}
+- Correlated Findings: {[f.title for f in correlation_result.findings] if correlation_result else []}
+- Operational Recommendation: {recommendation.executive_summary if recommendation else 'N/A'}
+
+Instructions:
+- Directly answer the user's question.
+- Synthesize investigation objective, empirical findings, confidence, and recommended remediation.
+- Return plain narrative text without markdown code fences or JSON formatting.
+"""
+        response_text = self._call_hf_api(prompt)
+        if response_text and response_text.strip():
+            return response_text.strip()
+        return self._fallback_executive_summary(user_question, correlation_result, rca, recommendation)
+
+    def _fallback_executive_summary(
+        self,
+        user_question: str,
+        corr: Optional[CorrelationResult] = None,
+        rca: Optional[RootCauseAnalysis] = None,
+        rec: Optional[RecommendationReport] = None,
+    ) -> str:
+        findings_count = len(corr.findings) if corr and corr.findings else 0
+        primary_rc = rca.primary_root_cause if rca else "Investigation Inconclusive"
+        conf_pct = f"{round(rca.overall_confidence * 100, 1)}%" if rca else "N/A"
+        top_rec = rec.executive_summary if rec else "Perform manual server diagnostics."
+
+        if not corr or not corr.findings:
+            return (
+                f"The investigation into '{user_question}' completed, but zero anomalous metrics were detected. "
+                f"All evaluated system indicators appear within normal operating thresholds. "
+                f"Recommended Action: {top_rec}"
+            )
+
+        top_finding = corr.findings[0]
+        ev_details = [f"{ev.metric_name} is currently at {ev.observed_value} (threshold: {ev.threshold})" for ev in top_finding.evidences]
+        ev_str = "; ".join(ev_details) if ev_details else top_finding.summary
+
+        return (
+            f"The investigation into '{user_question}' completed with {conf_pct} confidence based on {findings_count} correlated operational finding(s). "
+            f"Primary Cause: {primary_rc}. Key Evidence: {ev_str}. "
+            f"Recommended Operational Action: {top_rec}"
+        )
+
 
     def _fallback_recommendations_guidance(
         self,

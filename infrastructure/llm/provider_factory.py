@@ -15,32 +15,20 @@ Does NOT
 """
 
 from domain.llm import LLMProviderInterface
-from shared.config import get_settings
-
-from .gemini_provider import GeminiRCAProvider
-from .huggingface_provider import HuggingFaceProvider
+from .provider_manager import LLMProviderManager
 
 
 class LLMProviderFactory:
     """
-    Factory class providing static methods to create the active LLM Provider instance.
+    Factory class providing static methods to return the centralized LLMProviderManager instance.
     """
 
     @staticmethod
     def get_provider() -> LLMProviderInterface:
         """
-        Instantiates and returns the configured active LLM provider.
+        Returns the authoritative centralized LLMProviderManager instance.
         """
-        settings = get_settings()
-        provider_name = (settings.llm.provider or "huggingface").lower().strip()
-
-        if provider_name in ("huggingface", "hf", "qwen"):
-            return HuggingFaceProvider()
-        elif provider_name == "gemini":
-            return GeminiRCAProvider()
-        else:
-            # Default fallback to Hugging Face
-            return HuggingFaceProvider()
+        return LLMProviderManager()
 
     @staticmethod
     def create_rca_provider() -> LLMProviderInterface:

@@ -1,16 +1,12 @@
 """
 Purpose
 -------
-Memory domain correlation rules for analyzing RAM utilization, swap memory activity, and top memory processes.
+Memory domain correlation rules consuming structured telemetry for RAM, swap, and top memory processes.
 
 Responsibilities
 ----------------
-- Correlate RAM utilization with swap memory activity to detect memory pressure.
+- Correlate RAM utilization, active swap memory usage, and top process telemetry to detect memory pressure.
 - Produce structured Memory operational Findings.
-
-Does NOT
----------
-- Call LLM APIs or execute SSH commands.
 """
 
 from typing import List
@@ -27,7 +23,7 @@ from .base_rule import BaseCorrelationRule
 
 class MemoryPressureRule(BaseCorrelationRule):
     """
-    Correlates RAM utilization and active swap memory usage to detect system memory pressure.
+    Correlates RAM utilization, active swap memory usage, and top memory process telemetry.
     """
 
     @property
@@ -81,33 +77,40 @@ class MemoryPressureRule(BaseCorrelationRule):
                         )
                     )
 
-                if top_mem_step and top_mem_step.raw_output:
+                top_processes = []
+                if top_mem_step and top_mem_step.parsed_output:
+                    top_processes = top_mem_step.parsed_output.get("processes", [])
+
+                summary = f"System memory usage is elevated at {round(usage_pct, 1)}% ({used_mb}MB / {total_mb}MB used). "
+                if swap_used_mb > 0:
+                    summary += f"Swap memory is actively being used ({swap_used_mb}MB used)."
+
+                if top_processes:
+                    top_3 = top_processes[:3]
+                    proc_str = ", ".join([f"{p.get('command', 'proc')} (PID {p.get('pid')}, {p.get('usage_value')}%)" for p in top_3])
+                    summary += f" Top memory processes: {proc_str}."
                     evidences.append(
                         Evidence(
-                            metric_name="top_memory_processes_stdout",
-                            observed_value=top_mem_step.raw_output.strip().splitlines()[:5],
-                            source_command=top_mem_step.linux_command,
+                            metric_name="top_memory_processes",
+                            observed_value=top_3,
+                            source_command=top_mem_step.linux_command if top_mem_step else "ps",
                         )
                     )
 
-                severity = Severity.HIGH if (usage_pct > 90.0 or swap_used_mb > 500) else Severity.MEDIUM
-
-                summary = (
-                    f"System memory usage is at {round(usage_pct, 1)}% ({used_mb}MB / {total_mb}MB used). "
+                severity = Severity.CRITICAL if (usage_pct > 95.0 or swap_used_mb > 1000) else (
+                    Severity.HIGH if (usage_pct > 85.0 or swap_used_mb > 500) else Severity.MEDIUM
                 )
-                if swap_used_mb > 0:
-                    summary += f"Swap memory is actively being used ({swap_used_mb}MB used)."
 
                 findings.append(
                     Finding(
                         title="High Memory Pressure Detected",
                         category=FindingCategory.MEMORY,
                         severity=severity,
-                        confidence_score=0.92,
+                        confidence_score=0.95,
                         summary=summary,
                         evidences=evidences,
                         related_metrics=["memory_used_pct", "swap_used_mb", "available_mb"],
-                        affected_resources=["System Memory (RAM)", "Swap File/Partition"],
+                        affected_resources=["System Memory (RAM)", "Swap Partition"],
                     )
                 )
 

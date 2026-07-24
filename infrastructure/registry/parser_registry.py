@@ -6,14 +6,10 @@ Infrastructure service wrapping Linux stdout text parsers.
 Responsibilities
 ----------------
 - Delegate raw terminal output string parsing to structured JSON functions.
-
-Does NOT
----------
-- Embed parsing regular expressions inside domain business logic.
 """
 
 from typing import Any, Dict
-from parsers import parse_output
+from infrastructure.parsers.linux_parsers import parse_command_output
 
 
 class LinuxParserRegistry:
@@ -21,20 +17,20 @@ class LinuxParserRegistry:
     Infrastructure service providing parser resolution for Linux stdout text.
     """
 
-    def parse(self, command: str, raw_output: str) -> Dict[str, Any]:
+    def parse(self, command_identifier: str, raw_output: str) -> Dict[str, Any]:
         """
         Parses raw Linux stdout string into structured JSON output.
 
         Parameters
         ----------
-        command : str
-            Linux command executed.
+        command_identifier : str
+            Command key (e.g. 'cpu_load') or raw Linux command string.
         raw_output : str
             Raw stdout text returned over SSH.
 
         Returns
         -------
         Dict[str, Any]
-            Structured dictionary payload.
+            Structured telemetry dictionary payload.
         """
-        return parse_output(command, raw_output)
+        return parse_command_output(command_identifier, raw_output)
