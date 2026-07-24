@@ -19,12 +19,14 @@ import time
 from typing import Optional
 
 from application.correlation import CorrelationService
+from application.capability import CapabilityDiscoveryService
 from application.execution import ExecutionService
 from application.policy import PolicyService
 from application.rca import RCAService
 from application.recommendation import RecommendationService
 from application.summary import ExecutiveSummaryService
 from domain.investigation import InvestigationPlanner
+from domain.capability import ServerCapabilities
 from domain.report.models import InvestigationReport
 from shared.logging import get_logger
 
@@ -45,6 +47,7 @@ class InvestigationWorkflow:
         recommendation_service: Optional[RecommendationService] = None,
         policy_service: Optional[PolicyService] = None,
         summary_service: Optional[ExecutiveSummaryService] = None,
+        capability_discovery_service: Optional[CapabilityDiscoveryService] = None,
     ):
         self.planner = planner or InvestigationPlanner()
         self.execution_service = execution_service or ExecutionService()
@@ -53,6 +56,7 @@ class InvestigationWorkflow:
         self.recommendation_service = recommendation_service or RecommendationService()
         self.policy_service = policy_service or PolicyService()
         self.summary_service = summary_service or ExecutiveSummaryService()
+        self.capability_discovery_service = capability_discovery_service or CapabilityDiscoveryService()
 
     def execute_investigation(self, user_question: str) -> InvestigationReport:
         """
@@ -72,9 +76,13 @@ class InvestigationWorkflow:
         start_time = time.time()
         logger.info(f"Starting end-to-end investigation workflow for query: '{user_question}'")
 
+        # Step 0: Capability Discovery (read-only) before planning.
+        logger.info("[Pre-Planning] Discovering supported infrastructure capabilities...")
+        capabilities: ServerCapabilities = self.capability_discovery_service.discover()
+
         # Step 1: Phase 1 Investigation Planning
-        logger.info("[Stage 1/6] Generating Investigation Plan...")
-        plan = self.planner.create_plan(user_question)
+        logger.info("[Stage 1/6] Generating capability-aware Investigation Plan...")
+        plan = self.planner.create_plan(user_question, capabilities=capabilities)
 
         # Step 2: Phase 2 Multi-Command Execution
         logger.info(f"[Stage 2/6] Executing {len(plan.steps)} investigation step(s)...")
@@ -120,6 +128,7 @@ class InvestigationWorkflow:
             status=overall_status,
             total_execution_time_seconds=total_duration,
             executive_summary=executive_summary,
+            capabilities=capabilities,
             plan=plan,
             execution=execution,
             correlation=correlation,
@@ -130,5 +139,6 @@ class InvestigationWorkflow:
                 "workflow_version": "1.0.0",
                 "total_stages_completed": 6,
                 "synthesis_layer": "ExecutiveSummaryService",
+                "capability_discovery_duration_seconds": capabilities.discovery_duration_seconds,
             },
         )

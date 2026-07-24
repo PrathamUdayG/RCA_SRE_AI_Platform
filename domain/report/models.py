@@ -24,6 +24,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from domain.correlation.models import CorrelationResult
+from domain.capability.models import ServerCapabilities
 from domain.execution.models import InvestigationExecutionResult
 from domain.investigation.models import InvestigationPlan
 from domain.policy.models import PolicyDecision
@@ -123,6 +124,11 @@ class InvestigationReport(BaseModel):
     executive_summary: Optional[ExecutiveSummary] = Field(
         default=None,
         description="Executive Investigation Summary presentation synthesis layer."
+    )
+
+    capabilities: Optional[ServerCapabilities] = Field(
+        default=None,
+        description="Read-only pre-planning infrastructure capability discovery result.",
     )
 
     plan: Optional[InvestigationPlan] = Field(

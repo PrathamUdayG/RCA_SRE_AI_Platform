@@ -621,6 +621,36 @@ def _render_copilot_workspace(report: InvestigationReport):
         st.rerun()
 
 
+def _render_capability_discovery(report: InvestigationReport):
+    """Render the pre-planning, read-only host capability snapshot."""
+    capabilities = getattr(report, "capabilities", None)
+    if not capabilities:
+        return
+
+    with st.expander("Detected Infrastructure Capabilities", expanded=False):
+        st.caption(
+            f"Read-only discovery completed for `{capabilities.host}` in "
+            f"{capabilities.discovery_duration_seconds}s at {capabilities.detected_at.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+        )
+        st.write(f"**Operating system:** {capabilities.operating_system or 'Unknown'}")
+        st.write(f"**Kernel:** {capabilities.kernel_version or 'Unknown'}")
+
+        supported = [item.domain.value for item in capabilities.investigation_capabilities if item.supported]
+        unavailable = [item.domain.value for item in capabilities.investigation_capabilities if not item.supported]
+        st.write(f"**Supported investigation domains:** {', '.join(supported) or 'None'}")
+        if unavailable:
+            st.caption(f"Unavailable domains are excluded from planning: {', '.join(unavailable)}")
+
+        installed = [item for item in capabilities.technologies if item.installed]
+        if installed:
+            st.dataframe(
+                [{"Technology": item.name, "Category": item.category.value, "Version": item.version or "Detected"} for item in installed],
+                use_container_width=True,
+            )
+        else:
+            st.info("No optional technologies were detected; host-level investigations remain available.")
+
+
 def render_streamlit_dashboard():
     """Renders the Streamlit AI SRE Platform Web Dashboard."""
     st.set_page_config(
@@ -682,6 +712,11 @@ def render_streamlit_dashboard():
             _render_executive_summary(report)
         except Exception as err:
             st.error(f"Error rendering Executive Summary: {err}")
+
+        try:
+            _render_capability_discovery(report)
+        except Exception as err:
+            st.error(f"Error rendering capability discovery: {err}")
 
         try:
             _render_copilot_workspace(report)

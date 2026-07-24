@@ -18,6 +18,7 @@ Does NOT:
 
 from typing import Optional
 
+from domain.capability import CapabilityAwarePlanPolicy, ServerCapabilities
 from .exceptions import InvalidQuestionError, PlanGenerationError
 from .models import ExecutionStrategy, InvestigationPlan, InvestigationStatus
 from .rule_engine import RuleEngine
@@ -38,8 +39,11 @@ class InvestigationPlanner:
         template_registry = TemplateRegistry()
         self.rule_engine = rule_engine or RuleEngine(template_registry)
         self.strategy_evaluator = strategy_evaluator or StrategyEvaluator()
+        self.capability_policy = CapabilityAwarePlanPolicy()
 
-    def create_plan(self, user_question: str) -> InvestigationPlan:
+    def create_plan(
+        self, user_question: str, capabilities: Optional[ServerCapabilities] = None
+    ) -> InvestigationPlan:
         """
         Transforms a user's natural language question into an InvestigationPlan object.
 
@@ -62,6 +66,23 @@ class InvestigationPlanner:
             # 1. Analyze intent & generate diagnostic steps and priority
             steps, priority, template_name = self.rule_engine.match_rules(clean_question)
 
+            capability_notice = None
+            skipped_steps = []
+            if capabilities:
+                steps, skipped_steps = self.capability_policy.filter_steps(steps, capabilities)
+                if skipped_steps:
+                    capability_notice = (
+                        "Technology-specific diagnostics were excluded because the required "
+                        "capability was not detected. The investigation will use supported host diagnostics instead."
+                    )
+                if not steps:
+                    steps = self.rule_engine.registry.get_template("general_health")
+                    template_name = "general_health"
+                    capability_notice = (
+                        "The requested technology was not detected on this server. "
+                        "The investigation will use supported host CPU, memory, disk, and service diagnostics instead."
+                    )
+
             # 2. Determine execution strategy and estimated duration
             strategy, estimated_duration = self.strategy_evaluator.evaluate(steps)
 
@@ -76,6 +97,9 @@ class InvestigationPlanner:
                 metadata={
                     "matched_template": template_name,
                     "engine_version": "1.0.0",
+                    "capability_discovery_used": str(capabilities is not None),
+                    "skipped_unsupported_command_ids": ",".join(skipped_steps),
+                    "capability_notice": capability_notice or "",
                 },
             )
             return plan
