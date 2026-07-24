@@ -22,8 +22,11 @@ import streamlit as st
 
 from application.health import HealthService
 from application.workflow import InvestigationWorkflow
+from application.copilot import ConversationService, InvestigationContextService
+from domain.copilot import ConversationRole
 from domain.health.models import ComponentStatus
 from domain.report.models import InvestigationReport
+from infrastructure.persistence.in_memory_investigation_context_repository import InMemoryInvestigationContextRepository
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -558,6 +561,66 @@ def _render_technical_pipeline(report: InvestigationReport):
 # Main Dashboard Entry Point
 # ─────────────────────────────────────────────────────────────────────
 
+def _get_copilot_services():
+    """Return session-scoped Copilot services with no external side effects."""
+    if "copilot_repository" not in st.session_state:
+        st.session_state["copilot_repository"] = InMemoryInvestigationContextRepository()
+        st.session_state["copilot_context_service"] = InvestigationContextService(
+            st.session_state["copilot_repository"]
+        )
+        st.session_state["copilot_conversation_service"] = ConversationService(
+            st.session_state["copilot_repository"]
+        )
+    return (
+        st.session_state["copilot_repository"],
+        st.session_state["copilot_context_service"],
+        st.session_state["copilot_conversation_service"],
+    )
+
+
+def _render_copilot_workspace(report: InvestigationReport):
+    """Render investigation-bound follow-ups without starting a new investigation."""
+    repository, context_service, conversation_service = _get_copilot_services()
+    investigation_id = report.plan.investigation_id if report.plan else report.report_id
+    context = repository.get_context(investigation_id) or context_service.capture(report)
+
+    st.divider()
+    st.subheader("AI SRE Copilot")
+    st.caption(
+        "This conversation is anchored to the completed investigation. It uses saved artifacts only "
+        "and cannot run SSH commands, investigations, or remediation actions."
+    )
+
+    if context.suggested_questions:
+        st.markdown("**Suggested follow-up questions**")
+        question_columns = st.columns(2)
+        for index, suggestion in enumerate(context.suggested_questions):
+            with question_columns[index % 2]:
+                if st.button(suggestion, key=f"copilot_suggestion_{investigation_id}_{index}"):
+                    conversation_service.answer_follow_up(investigation_id, suggestion)
+                    st.rerun()
+
+    for message in repository.list_messages(investigation_id):
+        role = "user" if message.role == ConversationRole.USER else "assistant"
+        with st.chat_message(role):
+            st.write(message.content)
+            if message.citations:
+                with st.expander("Evidence used in this answer"):
+                    for citation in message.citations:
+                        st.markdown(
+                            f"- **{citation.finding_title}** — `{citation.metric_name}`: "
+                            f"`{citation.observed_value}` (threshold: `{citation.threshold}`, source: `{citation.source_command}`)"
+                        )
+
+    follow_up = st.chat_input(
+        "Ask about this investigation's evidence, cause, or recommendations…",
+        key=f"copilot_input_{investigation_id}",
+    )
+    if follow_up:
+        conversation_service.answer_follow_up(investigation_id, follow_up)
+        st.rerun()
+
+
 def render_streamlit_dashboard():
     """Renders the Streamlit AI SRE Platform Web Dashboard."""
     st.set_page_config(
@@ -607,6 +670,8 @@ def render_streamlit_dashboard():
             workflow = InvestigationWorkflow()
             report: InvestigationReport = workflow.execute_investigation(query.strip())
             st.session_state["last_investigation_report"] = report
+            _, context_service, _ = _get_copilot_services()
+            context_service.capture(report)
 
     # ── Render Executive Summary & Pipeline if report exists ─────────
     if "last_investigation_report" in st.session_state:
@@ -617,6 +682,11 @@ def render_streamlit_dashboard():
             _render_executive_summary(report)
         except Exception as err:
             st.error(f"Error rendering Executive Summary: {err}")
+
+        try:
+            _render_copilot_workspace(report)
+        except Exception as err:
+            st.error(f"Error rendering AI SRE Copilot workspace: {err}")
 
         # 2. SECONDARY DISPLAY: Technical Pipeline & Audit Trail (Phases 1–6)
         try:
